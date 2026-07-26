@@ -20,6 +20,12 @@ test('state transitions and draft-only deletion are enforced', () => {
   assert.match(backend, /record\.status !== 'draft'/)
 })
 
+test('entity updates never persist the internal query key', () => {
+  assert.match(backend, /function storedRecord/)
+  assert.doesNotMatch(backend, /announcements\.set\(record\._key, \{ \.\.\.record,/)
+  assert.ok((backend.match(/\.\.\.storedRecord\(record\)/g) || []).length >= 3)
+})
+
 test('manifest declares both modules and all storage entities', () => {
   for (const value of ['ones:project:component:new', 'ones:workspace:new', 'announcement_audience', 'announcement_read']) assert.ok(manifest.includes(value))
 })

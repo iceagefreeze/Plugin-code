@@ -1,7 +1,7 @@
 {
   "name": "ones-project-announcement",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "ONES 项目公告插件",
   "scripts": {
     "clear": "op invoke clear",

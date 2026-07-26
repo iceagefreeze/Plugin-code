@@ -2,7 +2,7 @@ service:
   app_id: ntfz02v8
   name: 项目公告
   description: 在项目内发布公告，并在个人工作台聚合展示
-  version: 1.0.1
+  version: 1.0.2
   mode: org
   logo: null
   language: nodejs

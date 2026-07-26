@@ -96,6 +96,10 @@ function publicRow(a: any, readSet: Set<string>) {
   try { attachments = JSON.parse(a.attachments_json || '[]') } catch {}
   return { id: a._key, ...a, attachments, is_read: readSet.has(a._key) }
 }
+function storedRecord(record: any): any {
+  const { _key, ...value } = record || {}
+  return value
+}
 function sortRows(a: any, b: any) { return Number(b.is_pinned) - Number(a.is_pinned) || (b.published_at || b.updated_at) - (a.published_at || a.updated_at) }
 async function requireRecord(req: any): Promise<{ user: string; team: string; record: any } | PluginResponse> {
   const user = operatorOf(req); if (!user) return fail(401, 'UNAUTHENTICATED', '未识别到登录用户')
@@ -105,11 +109,11 @@ async function requireRecord(req: any): Promise<{ user: string; team: string; re
   return { user, team, record: { _key: id, ...record } }
 }
 
-export async function Install() { Logger.info('[项目公告 v1.0.1] Install') }
-export async function Enable() { Logger.info('[项目公告 v1.0.1] Enable') }
-export function Disable() { Logger.info('[项目公告 v1.0.1] Disable') }
-export function UnInstall() { Logger.info('[项目公告 v1.0.1] UnInstall') }
-export function Upgrade(info: any) { Logger.info('[项目公告 v1.0.1] Upgrade', info?.version) }
+export async function Install() { Logger.info('[项目公告 v1.0.2] Install') }
+export async function Enable() { Logger.info('[项目公告 v1.0.2] Enable') }
+export function Disable() { Logger.info('[项目公告 v1.0.2] Disable') }
+export function UnInstall() { Logger.info('[项目公告 v1.0.2] UnInstall') }
+export function Upgrade(info: any) { Logger.info('[项目公告 v1.0.2] Upgrade', info?.version) }
 export async function copyProjectAnnouncementData(): Promise<PluginResponse> { return ok({ copied: false }) }
 
 export async function createAnnouncement(req: PluginRequest): Promise<PluginResponse> {
@@ -128,7 +132,7 @@ export async function updateAnnouncement(req: PluginRequest): Promise<PluginResp
   const { user, record } = found as any; if (record.creator_uuid !== user) return fail(403, 'FORBIDDEN', '仅创建者可编辑')
   try {
     const value = validateDraft(bodyOf(req))
-    await announcements.set(record._key, { ...record, title: value.title, content_html: value.content_html, attachments_json: JSON.stringify(value.attachments), audience_type: value.audience_type, is_pinned: value.is_pinned, updated_at: Date.now() })
+    await announcements.set(record._key, { ...storedRecord(record), title: value.title, content_html: value.content_html, attachments_json: JSON.stringify(value.attachments), audience_type: value.audience_type, is_pinned: value.is_pinned, updated_at: Date.now() })
     await replaceAudience(record._key, record.team_uuid, record.project_uuid, value.audience); return ok({ id: record._key })
   } catch (e: any) { return fail(400, 'VALIDATION_ERROR', e?.message || '参数错误') }
 }
@@ -138,7 +142,7 @@ async function transition(req: PluginRequest, target: Status): Promise<PluginRes
   const allowed = target === 'published' ? ['draft','withdrawn'] : ['published']
   if (!allowed.includes(record.status)) return fail(409, 'INVALID_STATE', '当前状态不允许此操作')
   if (target === 'published' && record.audience_type === 'selected' && !(await audienceFor(record._key)).length) return fail(400, 'EMPTY_AUDIENCE', '定向公告没有受众')
-  const now = Date.now(); await announcements.set(record._key, { ...record, status: target, published_at: target === 'published' ? (record.published_at || now) : record.published_at, updated_at: now })
+  const now = Date.now(); await announcements.set(record._key, { ...storedRecord(record), status: target, published_at: target === 'published' ? (record.published_at || now) : record.published_at, updated_at: now })
   return ok({ id: record._key, status: target })
 }
 export const publishAnnouncement = (r: PluginRequest) => transition(r, 'published')
@@ -146,7 +150,7 @@ export const withdrawAnnouncement = (r: PluginRequest) => transition(r, 'withdra
 export async function pinAnnouncement(req: PluginRequest): Promise<PluginResponse> {
   const found = await requireRecord(req); if ('body' in found && !('record' in found)) return found
   const { user, record } = found as any; if (record.creator_uuid !== user) return fail(403, 'FORBIDDEN', '仅创建者可置顶')
-  await announcements.set(record._key, { ...record, is_pinned: !!bodyOf(req).is_pinned, updated_at: Date.now() }); return ok({ id: record._key })
+  await announcements.set(record._key, { ...storedRecord(record), is_pinned: !!bodyOf(req).is_pinned, updated_at: Date.now() }); return ok({ id: record._key })
 }
 export async function deleteAnnouncement(req: PluginRequest): Promise<PluginResponse> {
   const found = await requireRecord(req); if ('body' in found && !('record' in found)) return found
