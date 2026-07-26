@@ -105,11 +105,11 @@ async function requireRecord(req: any): Promise<{ user: string; team: string; re
   return { user, team, record: { _key: id, ...record } }
 }
 
-export async function Install() { Logger.info('[项目公告 v1.0.0] Install') }
-export async function Enable() { Logger.info('[项目公告 v1.0.0] Enable') }
-export function Disable() { Logger.info('[项目公告 v1.0.0] Disable') }
-export function UnInstall() { Logger.info('[项目公告 v1.0.0] UnInstall') }
-export function Upgrade(info: any) { Logger.info('[项目公告 v1.0.0] Upgrade', info?.version) }
+export async function Install() { Logger.info('[项目公告 v1.0.1] Install') }
+export async function Enable() { Logger.info('[项目公告 v1.0.1] Enable') }
+export function Disable() { Logger.info('[项目公告 v1.0.1] Disable') }
+export function UnInstall() { Logger.info('[项目公告 v1.0.1] UnInstall') }
+export function Upgrade(info: any) { Logger.info('[项目公告 v1.0.1] Upgrade', info?.version) }
 export async function copyProjectAnnouncementData(): Promise<PluginResponse> { return ok({ copied: false }) }
 
 export async function createAnnouncement(req: PluginRequest): Promise<PluginResponse> {

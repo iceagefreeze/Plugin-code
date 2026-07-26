@@ -34,8 +34,9 @@ export async function teamMembers(team: string): Promise<User[]> {
 }
 export async function api<T=any>(path: string, body: any = {}): Promise<T> {
   const team = getTeamUUID(); if (!team) throw new Error('无法识别团队上下文')
-  const res = await fetch(`/project/api/project/team/${team}/plugin/ntfz02v8/api${path}`, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json','Ones-Plugin-Id':'ntfz02v8'}, body:JSON.stringify({ ...body, team_uuid: team }) })
+  const res = await fetch(`/project/api/project/team/${team}${path}`, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ ...body, team_uuid: team }) })
   let j:any = {}; try { j = await res.json() } catch {}
-  if (!res.ok || !j.ok) throw new Error(j?.error?.message || `请求失败 (${res.status})`)
-  return j.data as T
+  const payload = j?.body || j?.data || j
+  if (!res.ok || !payload?.ok) throw new Error(payload?.error?.message || `请求失败 (${res.status})`)
+  return payload.data as T
 }
