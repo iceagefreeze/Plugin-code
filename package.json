@@ -1,0 +1,40 @@
+{
+  "name": "ones-project-announcement",
+  "private": true,
+  "version": "1.0.0",
+  "description": "ONES 项目公告插件",
+  "scripts": {
+    "clear": "op invoke clear",
+    "debug": "op invoke run",
+    "format:manifest": "op format config/plugin.yaml",
+    "typecheck": "tsc -p backend/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
+    "packup": "op packup",
+    "test": "node --test tests/*.test.cjs"
+  },
+  "engines": { "node": ">=16.13.0" },
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@ones/cli": "1.70.56",
+    "@ones/cli-plugin": "1.70.56",
+    "@rollup/plugin-replace": "5.0.2",
+    "@rollup/plugin-commonjs": "25.0.7",
+    "@rollup/plugin-json": "6.1.0",
+    "@rollup/plugin-node-resolve": "15.3.1",
+    "@types/react": "~17.0.85",
+    "@types/react-dom": "~17.0.26",
+    "js-yaml": "^4.1.1",
+    "rollup": "3.29.5",
+    "rollup-plugin-typescript2": "0.32.1",
+    "typescript": "~5.1.6"
+    ,"webpack": "5.74.0"
+  },
+  "dependencies": {
+    "@ones-op/fetch": "1.70.56",
+    "@ones-op/node-logger": "^1.0.0",
+    "@ones-op/node-types": "^1.0.0",
+    "@ones-op/sdk": "1.70.56",
+    "react": "~17.0.2",
+    "react-dom": "~17.0.2"
+  },
+  "workspaces": ["web", "backend"]
+}

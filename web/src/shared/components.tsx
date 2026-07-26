@@ -1,0 +1,5 @@
+import React from 'react'
+import type { Announcement } from './api'
+export const fmt=(n:number)=>n?new Date(n).toLocaleString():'—'
+export function Badge({a}:{a:Announcement}) { return <span className="row"><span className="pill">{{draft:'草稿',published:'已发布',withdrawn:'已撤回'}[a.status]}</span>{a.is_pinned&&<span className="pin">📌 置顶</span>}{!a.is_read&&a.status==='published'&&<span className="pill">未读</span>}</span> }
+export function Detail({a,onClose,onRead}:{a:Announcement,onClose:()=>void,onRead:()=>void}) { React.useEffect(()=>{if(a.status==='published'&&!a.is_read)onRead()},[a.id]); return <div className="overlay"><div className="modal"><div className="bar"><Badge a={a}/><button onClick={onClose}>关闭</button></div><h2>{a.title}</h2><div className="muted">{a.creator_name||a.creator_uuid} · 发布 {fmt(a.published_at)} · 更新 {fmt(a.updated_at)}</div><hr/><div className="content" dangerouslySetInnerHTML={{__html:a.content_html}}/>{a.attachments?.length>0&&<><h3>附件链接</h3>{a.attachments.map((x,i)=><div key={i}><a href={x.url} target="_blank" rel="noopener noreferrer">📎 {x.name}</a></div>)}</>}</div></div> }

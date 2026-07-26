@@ -1,0 +1,4 @@
+__test__/
+op.config.mjs
+dist/
+**/dist/**

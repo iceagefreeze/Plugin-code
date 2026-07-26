@@ -1,0 +1,7 @@
+packages:
+  - web
+  - backend
+
+allowBuilds:
+  core-js-pure: set this to true or false
+  protobufjs: set this to true or false

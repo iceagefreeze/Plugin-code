@@ -1,0 +1,22 @@
+{
+  "name": "ones-project-announcement-web",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "devDependencies": {
+    "@babel/core": "~7.26.10",
+    "@babel/plugin-transform-runtime": "~7.26.10",
+    "@babel/preset-env": "~7.26.9",
+    "@babel/preset-react": "~7.26.3",
+    "@babel/preset-typescript": "~7.26.0",
+    "@babel/runtime-corejs3": "~7.26.10",
+    "@types/react": "~17.0.85",
+    "@types/react-dom": "~17.0.26",
+    "babel-loader": "~8.2.5",
+    "css-loader": "~6.7.4",
+    "postcss": "~8.5.3",
+    "postcss-loader": "~7.0.2",
+    "react": "~17.0.2",
+    "react-dom": "~17.0.2"
+  }
+}

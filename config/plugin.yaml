@@ -1,0 +1,226 @@
+service:
+  app_id: ntfz02v8
+  name: 项目公告
+  description: 在项目内发布公告，并在个人工作台聚合展示
+  version: 1.0.0
+  mode: org
+  logo: null
+  language: nodejs
+  language_version: 16.13.0
+  host_version: 1.0.4
+  host_sub_version: 1.0.0
+  min_system_version: 3.11.16
+  auth: null
+  config: null
+  scope: 1
+  policy:
+    policy: simple
+    target: ''
+modules:
+  - id: project-announcement
+    moduleType: ones:project:component:new
+    title: 项目公告
+    description: 发布和查看当前项目公告
+    entry: ./modules/project-announcement/index.tsx
+  - id: announcement-center
+    moduleType: ones:workspace:new
+    title: 公告中心
+    description: 聚合展示我可见的项目公告
+    entry: modules/announcement-center/index.html
+abilities:
+  - id: project-announcement-component
+    name: ProjectCustomComponent
+    version: 1.0.0
+    abilityType: ProjectCustomComponent
+    function:
+      copyPluginData: copyProjectAnnouncementData
+    relateModule:
+      componentModuleEnter: project-announcement
+    config:
+      - key: component_name
+        label: 组件名称
+        value: 项目公告
+        fieldType: Input
+        show: true
+      - key: component_desc
+        label: 组件描述
+        value: 发布和查看当前项目公告
+        fieldType: TextArea
+        show: true
+      - key: is_support_copy
+        label: 是否支持数据复制
+        value: false
+        fieldType: Switch
+        show: false
+apis:
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/list
+    function: listAnnouncements
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/my
+    function: listMyAnnouncements
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/detail
+    function: getAnnouncement
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/create
+    function: createAnnouncement
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/update
+    function: updateAnnouncement
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/publish
+    function: publishAnnouncement
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/withdraw
+    function: withdrawAnnouncement
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/pin
+    function: pinAnnouncement
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/delete
+    function: deleteAnnouncement
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/read
+    function: markAnnouncementRead
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/stats
+    function: getAnnouncementStats
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/announcements/capabilities
+    function: getCapabilities
+storage:
+  entities:
+    - name: announcement
+      attributes:
+        team_uuid:
+          type: text
+          length: 64
+          default: ''
+        project_uuid:
+          type: text
+          length: 64
+          default: ''
+        title:
+          type: text
+          length: 256
+          default: ''
+        content_html:
+          type: text
+          length: 32768
+          default: ''
+        attachments_json:
+          type: text
+          length: 8192
+          default: '[]'
+        status:
+          type: text
+          length: 16
+          default: draft
+        creator_uuid:
+          type: text
+          length: 64
+          default: ''
+        creator_name:
+          type: text
+          length: 128
+          default: ''
+        audience_type:
+          type: text
+          length: 16
+          default: all
+        is_pinned:
+          type: boolean
+          default: false
+        created_at:
+          type: integer
+          length: 16
+          default: 0
+        published_at:
+          type: integer
+          length: 16
+          default: 0
+        updated_at:
+          type: integer
+          length: 16
+          default: 0
+    - name: announcement_audience
+      attributes:
+        announcement_id:
+          type: text
+          length: 64
+          default: ''
+        team_uuid:
+          type: text
+          length: 64
+          default: ''
+        project_uuid:
+          type: text
+          length: 64
+          default: ''
+        user_uuid:
+          type: text
+          length: 64
+          default: ''
+        user_name:
+          type: text
+          length: 128
+          default: ''
+        created_at:
+          type: integer
+          length: 16
+          default: 0
+    - name: announcement_read
+      attributes:
+        announcement_id:
+          type: text
+          length: 64
+          default: ''
+        team_uuid:
+          type: text
+          length: 64
+          default: ''
+        project_uuid:
+          type: text
+          length: 64
+          default: ''
+        user_uuid:
+          type: text
+          length: 64
+          default: ''
+        user_name:
+          type: text
+          length: 128
+          default: ''
+        first_read_at:
+          type: integer
+          length: 16
+          default: 0
+        last_read_at:
+          type: integer
+          length: 16
+          default: 0
