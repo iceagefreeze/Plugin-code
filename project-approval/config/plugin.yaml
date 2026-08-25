@@ -2,7 +2,7 @@ service:
   app_id: project_approval
   name: 立项审批
   description: 立项审批通过后自动创建项目
-  version: 1.0.0
+  version: 1.0.1
   mode: team
   logo: null
   language: nodejs
@@ -102,6 +102,14 @@ storage:
         project_name:
           type: text
           length: 256
+          default: ''
+        project_type_uuid:
+          type: text
+          length: 64
+          default: ''
+        project_type_name:
+          type: text
+          length: 128
           default: ''
         error_code:
           type: text

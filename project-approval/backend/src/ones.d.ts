@@ -24,6 +24,8 @@ declare var ONESEntities: {
             status?: string;
             project_uuid?: string;
             project_name?: string;
+            project_type_uuid?: string;
+            project_type_name?: string;
             error_code?: string;
             error_message?: string;
             retry_count?: number;
