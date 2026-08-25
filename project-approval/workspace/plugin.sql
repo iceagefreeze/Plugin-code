@@ -1,0 +1,1 @@
+-- 立项审批插件不使用 SQL 表，业务数据存储在 Entity Storage。

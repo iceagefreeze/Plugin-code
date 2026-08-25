@@ -1,0 +1,3 @@
+workspace:
+  rule: save_new
+  exclude: []

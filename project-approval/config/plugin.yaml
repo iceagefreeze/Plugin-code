@@ -1,0 +1,119 @@
+service:
+  app_id: project_approval
+  name: 立项审批
+  description: 立项审批通过后自动创建项目
+  version: 1.0.0
+  mode: team
+  logo: null
+  language: nodejs
+  language_version: 16.13.0
+  host_version: 1.0.4
+  host_sub_version: 1.0.0
+  min_system_version: 3.11.16
+  auth: null
+  config: null
+  scope: 1
+  policy:
+    policy: simple
+    target: ''
+modules:
+  - id: approval-settings
+    moduleType: settings
+    title: 立项审批配置
+    entry: modules/settings/index.html
+  - id: approval-detail
+    moduleType: ones:workspace:new
+    title: 立项审批记录
+    entry: modules/approval-detail/index.html
+apis:
+  - type: external
+    methods:
+      - POST
+    url: /config/get
+    function: getConfig
+  - type: external
+    methods:
+      - POST
+    url: /config/save
+    function: saveConfig
+  - type: external
+    methods:
+      - POST
+    url: /records/list
+    function: listRecords
+  - type: external
+    methods:
+      - POST
+    url: /records/retry
+    function: retryRecord
+events:
+  - eventType: ones:project:issue-status:changed
+    function: onIssueStatusChanged
+storage:
+  entities:
+    - name: approval_config
+      attributes:
+        team_uuid:
+          type: text
+          length: 64
+          default: ''
+        approval_project_uuid:
+          type: text
+          length: 64
+          default: ''
+        issue_type_uuid:
+          type: text
+          length: 64
+          default: ''
+        approved_status_uuid:
+          type: text
+          length: 64
+          default: ''
+        approved_status_name:
+          type: text
+          length: 64
+          default: 已通过
+        template_uuid:
+          type: text
+          length: 64
+          default: ''
+    - name: approval_record
+      attributes:
+        issue_uuid:
+          type: text
+          length: 64
+          default: ''
+        team_uuid:
+          type: text
+          length: 64
+          default: ''
+        event_id:
+          type: text
+          length: 128
+          default: ''
+        status:
+          type: text
+          length: 16
+          default: pending
+        project_uuid:
+          type: text
+          length: 64
+          default: ''
+        project_name:
+          type: text
+          length: 256
+          default: ''
+        error_code:
+          type: text
+          length: 64
+          default: ''
+        error_message:
+          type: text
+          length: 1024
+          default: ''
+        retry_count:
+          type: integer
+          default: 0
+        updated_at:
+          type: integer
+          default: 0
