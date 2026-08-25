@@ -2,7 +2,7 @@ service:
   app_id: project_approval
   name: 立项审批
   description: 立项审批通过后自动创建项目
-  version: 1.0.1
+  version: 1.0.2
   mode: team
   logo: null
   language: nodejs
@@ -29,22 +29,22 @@ apis:
   - type: external
     methods:
       - POST
-    url: /config/get
+    url: /team/:teamUUID/config/get
     function: getConfig
   - type: external
     methods:
       - POST
-    url: /config/save
+    url: /team/:teamUUID/config/save
     function: saveConfig
   - type: external
     methods:
       - POST
-    url: /records/list
+    url: /team/:teamUUID/records/list
     function: listRecords
   - type: external
     methods:
       - POST
-    url: /records/retry
+    url: /team/:teamUUID/records/retry
     function: retryRecord
 events:
   - eventType: ones:project:issue-status:changed

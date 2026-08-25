@@ -8,7 +8,11 @@ const ok = (data: unknown = null): PluginResponse => ({ body: { ok: true, data, 
 const fail = (code: string, message: string, statusCode = 400): PluginResponse => ({ statusCode, body: { ok: false, data: null, error: { code, message } } })
 const body = (r: any) => r?.body && typeof r.body === 'object' ? r.body : {}
 const user = (r: any) => String(r?.headers?.['ones-user-id'] || r?.headers?.['Ones-User-Id'] || '')
-const team = (r: any) => String(body(r).team_uuid || r?.headers?.['ones-check-id'] || r?.headers?.['Ones-Check-Id'] || '')
+const team = (r: any) => {
+  const fromParams = r?.params?.teamUUID || r?.params?.team_uuid
+  const fromUrl = String(r?.url || r?.path || '').split('?')[0].match(/\/team\/([A-Za-z0-9_-]+)/)?.[1]
+  return String(fromParams || fromUrl || body(r).team_uuid || r?.headers?.['ones-check-id'] || r?.headers?.['Ones-Check-Id'] || '')
+}
 const key = (teamUUID: string) => `team_${teamUUID}`
 const eventOf = (r: any) => { const e = r?.body?.eventID ? r.body : r; return { id: String(e?.eventID || ''), ctx: e?.eventContext || {}, data: e?.eventData || {} } }
 async function config(teamUUID: string): Promise<any> { return (await configs.get(key(teamUUID))) || {} }
