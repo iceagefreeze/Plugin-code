@@ -2,7 +2,7 @@ service:
   app_id: project_approval
   name: 立项审批
   description: 立项审批通过后自动创建项目
-  version: 1.0.2
+  version: 1.0.3
   mode: team
   logo: null
   language: nodejs
