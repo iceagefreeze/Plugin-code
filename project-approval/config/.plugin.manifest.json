@@ -1,0 +1,33 @@
+{
+  "env": {
+    "node": "v24.19.0",
+    "npm": "10.9.3",
+    "ones": "1.70.56",
+    "op": "1.70.56"
+  },
+  "root": {
+    "overrides": {},
+    "dependencies": {
+      "@ones-op/fetch": "1.70.56",
+      "@ones-op/node-types": "^1.0.0",
+      "@ones-op/sdk": "1.70.56",
+      "react": "~17.0.2",
+      "react-dom": "~17.0.2"
+    },
+    "devDependencies": {
+      "@types/react": "~17.0.85",
+      "@types/react-dom": "~17.0.26",
+      "typescript": "~5.1.6"
+    }
+  },
+  "backend": {
+    "overrides": {},
+    "dependencies": {},
+    "devDependencies": {}
+  },
+  "web": {
+    "overrides": {},
+    "dependencies": {},
+    "devDependencies": {}
+  }
+}

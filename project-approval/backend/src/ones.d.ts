@@ -5,7 +5,7 @@
  * DO NOT MODIFY MANUALLY
  */
 declare var ONESEntities: {
-    approval_config_fresh: {
+    appr_cfg_v2: {
         attributes: {
             team_uuid?: string;
             approval_project_uuid?: string;
@@ -17,7 +17,7 @@ declare var ONESEntities: {
         };
         indexes: null;
     };
-    approval_config_legacy: {
+    appr_cfg_old: {
         attributes: {
             team_uuid?: string;
             approval_project_uuid?: string;
@@ -28,7 +28,7 @@ declare var ONESEntities: {
         };
         indexes: null;
     };
-    approval_record_fresh: {
+    appr_rec_v2: {
         attributes: {
             issue_uuid?: string;
             team_uuid?: string;

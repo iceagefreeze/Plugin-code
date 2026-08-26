@@ -2,8 +2,8 @@ import { storage } from '@ones-op/sdk/node'
 import { OPFetch } from '@ones-op/fetch'
 import type { PluginRequest, PluginResponse } from '@ones-op/node-types'
 
-const records = storage.entity('approval_record_fresh')
-const configs = storage.entity('approval_config_fresh')
+const records = storage.entity('appr_rec_v2')
+const configs = storage.entity('appr_cfg_v2')
 const ok = (data: unknown = null): PluginResponse => ({ body: { ok: true, data, error: null } })
 const fail = (code: string, message: string, statusCode = 400): PluginResponse => ({ statusCode, body: { ok: false, data: null, error: { code, message } } })
 const body = (r: any) => r?.body && typeof r.body === 'object' ? r.body : {}
