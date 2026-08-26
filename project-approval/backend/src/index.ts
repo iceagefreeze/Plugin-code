@@ -27,10 +27,11 @@ const eventOf = (r: any) => { const e = r?.body?.eventID ? r.body : r; return { 
 async function config(teamUUID: string): Promise<any> { return runtimeConfig[teamUUID] || (await configs.get(key(teamUUID))) || {} }
 async function issueDetail(teamUUID: string, issueUUID: string): Promise<any> { const r: any = await OPFetch(`/project/api/project/team/${teamUUID}/issues/${issueUUID}`, { method: 'GET', teamUUID }); return r?.data || r }
 async function createProject(teamUUID: string, input: any, templateUUID: string): Promise<string> {
-  const r: any = await OPFetch(`/project/api/project/team/${teamUUID}/projects`, { method: 'POST', teamUUID, headers: { 'Content-Type': 'application/json' }, data: { name: input.name, description: input.description || '', owner: input.owner, start_time: input.start_time || 0, end_time: input.end_time || 0, template_uuid: templateUUID, project_type_uuid: input.project_type_uuid || '', project_type: input.project_type_name || '' } })
-  const id = r?.project_uuid || r?.uuid || r?.data?.project_uuid || r?.data?.uuid
-  if (!id) throw Object.assign(new Error('创建项目接口未返回项目 UUID'), { code: 'INVALID_RESPONSE' })
-  return String(id)
+  const payload = { name: input.name, project_name: input.name, description: input.description || '', owner: input.owner || '', owner_uuid: input.owner || '', start_time: input.start_time || 0, end_time: input.end_time || 0, template_uuid: templateUUID, project_template_uuid: templateUUID }
+  const urls = [`/project/api/project/team/${teamUUID}/projects`, `/project/api/project/team/${teamUUID}/projects/create`]
+  let last: any
+  for (const url of urls) { try { const r: any = await OPFetch(url, { method: 'POST', teamUUID, headers: { 'Content-Type': 'application/json' }, data: payload }); const x = r?.body || r?.data || r; const id = x?.project_uuid || x?.projectUUID || x?.uuid || x?.id || x?.data?.project_uuid || x?.data?.uuid || x?.data?.id; if (id) return String(id); last = r } catch (e) { last = e } }
+  throw Object.assign(new Error('创建项目接口未返回项目 UUID'), { code: 'INVALID_RESPONSE', detail: String(last?.message || '') })
 }
 function singleSelect(value: any): { uuid: string; name: string } {
   const v = Array.isArray(value) ? value[0] : value
