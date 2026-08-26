@@ -5,7 +5,19 @@
  * DO NOT MODIFY MANUALLY
  */
 declare var ONESEntities: {
-    approval_config: {
+    approval_config_fresh: {
+        attributes: {
+            team_uuid?: string;
+            approval_project_uuid?: string;
+            issue_type_uuid?: string;
+            approved_status_uuid?: string;
+            approved_status_name?: string;
+            template_uuid?: string;
+            mapping_json?: string;
+        };
+        indexes: null;
+    };
+    approval_config_legacy: {
         attributes: {
             team_uuid?: string;
             approval_project_uuid?: string;
@@ -16,7 +28,7 @@ declare var ONESEntities: {
         };
         indexes: null;
     };
-    approval_record: {
+    approval_record_fresh: {
         attributes: {
             issue_uuid?: string;
             team_uuid?: string;

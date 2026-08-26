@@ -1,8 +1,8 @@
 service:
-  app_id: project_approval
+  app_id: project_approval_v2
   name: 立项审批
   description: 立项审批通过后自动创建项目
-  version: 1.0.3
+  version: 2.0.0
   mode: team
   logo: null
   language: nodejs
@@ -51,7 +51,7 @@ events:
     function: onIssueStatusChanged
 storage:
   entities:
-    - name: approval_config
+    - name: approval_config_fresh
       attributes:
         team_uuid:
           type: text
@@ -77,7 +77,37 @@ storage:
           type: text
           length: 64
           default: ''
-    - name: approval_record
+        mapping_json:
+          type: text
+          length: 4096
+          default: '{}'
+    - name: approval_config_legacy
+      attributes:
+        team_uuid:
+          type: text
+          length: 64
+          default: ''
+        approval_project_uuid:
+          type: text
+          length: 64
+          default: ''
+        issue_type_uuid:
+          type: text
+          length: 64
+          default: ''
+        approved_status_uuid:
+          type: text
+          length: 64
+          default: ''
+        approved_status_name:
+          type: text
+          length: 64
+          default: 已通过
+        template_uuid:
+          type: text
+          length: 64
+          default: ''
+    - name: approval_record_fresh
       attributes:
         issue_uuid:
           type: text

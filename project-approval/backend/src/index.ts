@@ -2,18 +2,24 @@ import { storage } from '@ones-op/sdk/node'
 import { OPFetch } from '@ones-op/fetch'
 import type { PluginRequest, PluginResponse } from '@ones-op/node-types'
 
-const configs = storage.entity('approval_config')
-const records = storage.entity('approval_record')
+const records = storage.entity('approval_record_fresh')
+const configs = storage.entity('approval_config_fresh')
 const ok = (data: unknown = null): PluginResponse => ({ body: { ok: true, data, error: null } })
 const fail = (code: string, message: string, statusCode = 400): PluginResponse => ({ statusCode, body: { ok: false, data: null, error: { code, message } } })
 const body = (r: any) => r?.body && typeof r.body === 'object' ? r.body : {}
-const user = (r: any) => String(r?.headers?.['ones-user-id'] || r?.headers?.['Ones-User-Id'] || '')
+const user = (r: any) => String(r?.headers?.['ones-user-id'] || r?.headers?.['Ones-User-Id'] || r?.headers?.['ones-user-uuid'] || r?.headers?.['Ones-User-UUID'] || r?.user?.id || 'session')
 const team = (r: any) => {
   const fromParams = r?.params?.teamUUID || r?.params?.team_uuid
   const fromUrl = String(r?.url || r?.path || '').split('?')[0].match(/\/team\/([A-Za-z0-9_-]+)/)?.[1]
   return String(fromParams || fromUrl || body(r).team_uuid || r?.headers?.['ones-check-id'] || r?.headers?.['Ones-Check-Id'] || '')
 }
 const key = (teamUUID: string) => `team_${teamUUID}`
+const normalizeId = (value: any) => {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  const matches = text.match(/[A-Za-z0-9_-]{8,64}/g)
+  return matches?.length ? matches[matches.length - 1] : text
+}
 const eventOf = (r: any) => { const e = r?.body?.eventID ? r.body : r; return { id: String(e?.eventID || ''), ctx: e?.eventContext || {}, data: e?.eventData || {} } }
 async function config(teamUUID: string): Promise<any> { return (await configs.get(key(teamUUID))) || {} }
 async function issueDetail(teamUUID: string, issueUUID: string): Promise<any> { const r: any = await OPFetch({ url: `/project/api/project/team/${teamUUID}/issues/${issueUUID}`, method: 'GET' }); return r?.data || r }
@@ -45,6 +51,6 @@ async function run(teamUUID: string, issueUUID: string, eventID: string, retry =
 }
 export async function onIssueStatusChanged(req: PluginRequest): Promise<PluginResponse> { const e = eventOf(req), teamUUID = String(e.ctx.teamID || ''); if (!teamUUID || !e.data.issueID) return ok({ ignored: true }); const c = await config(teamUUID); if (!c.approval_project_uuid || !c.issue_type_uuid || !isApproved(c, e.data.newStatus)) return ok({ ignored: true }); const issue = await issueDetail(teamUUID, e.data.issueID); const issueType = String(issue?.issue_type_uuid || issue?.issueTypeUUID || issue?.type_uuid || issue?.issueType?.uuid || ''); if (issueType && issueType !== c.issue_type_uuid) return ok({ ignored: true }); if (issue?.project_uuid && issue.project_uuid !== c.approval_project_uuid) return ok({ ignored: true }); try { return ok(await run(teamUUID, String(e.data.issueID), e.id)) } catch { return ok({ status: 'failed', issue_uuid: e.data.issueID }) } }
 export async function getConfig(req: PluginRequest): Promise<PluginResponse> { return ok(await config(team(req))) }
-export async function saveConfig(req: PluginRequest): Promise<PluginResponse> { if (!user(req)) return fail('UNAUTHENTICATED', '未识别到登录用户', 401); const b = body(req); if (!b.approval_project_uuid || !b.issue_type_uuid || !b.template_uuid || (!b.approved_status_uuid && !b.approved_status_name)) return fail('INVALID_CONFIG', '审批项目、工作项类型、通过状态和模板均为必填'); await configs.set(key(team(req)), { team_uuid: team(req), approval_project_uuid: String(b.approval_project_uuid), issue_type_uuid: String(b.issue_type_uuid), approved_status_uuid: String(b.approved_status_uuid || ''), approved_status_name: String(b.approved_status_name || '已通过'), template_uuid: String(b.template_uuid) }); return ok(await config(team(req))) }
+export async function saveConfig(req: PluginRequest): Promise<PluginResponse> { const teamUUID = team(req); if (!teamUUID) return fail('MISSING_TEAM', '无法识别当前团队，请从团队插件配置页打开'); const b = body(req); const approvalProject = normalizeId(b.approval_project_uuid); const issueType = normalizeId(b.issue_type_uuid); const template = normalizeId(b.template_uuid); if (!approvalProject || !issueType || !template || (!b.approved_status_uuid && !b.approved_status_name)) return fail('INVALID_CONFIG', '审批项目、工作项类型、通过状态和模板均为必填'); try { let mapping = '{}'; if (typeof b.mapping_json === 'string') { JSON.parse(b.mapping_json); mapping = b.mapping_json.slice(0, 4096) } else if (b.mapping_json && typeof b.mapping_json === 'object') mapping = JSON.stringify(b.mapping_json).slice(0, 4096); await configs.set(key(teamUUID), { team_uuid: teamUUID, approval_project_uuid: approvalProject, issue_type_uuid: issueType, approved_status_uuid: normalizeId(b.approved_status_uuid), approved_status_name: String(b.approved_status_name || '已通过').trim(), template_uuid: template, mapping_json: mapping }); return ok(await config(teamUUID)) } catch (e: any) { return fail('CONFIG_SAVE_FAILED', `配置保存失败：${e?.message || '服务器内部错误'}`, 500) } }
 export async function listRecords(req: PluginRequest): Promise<PluginResponse> { const q: any = await records.query().limit(200).getMany(); return ok({ items: (q?.data || []).map((x: any) => ({ id: x.key, ...x.value })) }) }
 export async function retryRecord(req: PluginRequest): Promise<PluginResponse> { if (!user(req)) return fail('UNAUTHENTICATED', '未识别到登录用户', 401); const id = String(body(req).issue_uuid || ''); if (!id) return fail('INVALID_REQUEST', '缺少 issue_uuid'); try { return ok(await run(team(req), id, `manual_${Date.now()}`, true)) } catch (e: any) { return fail(e?.code || 'CREATE_FAILED', e?.message || '创建项目失败') } }
