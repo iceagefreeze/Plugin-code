@@ -25,7 +25,7 @@ const normalizeId = (value: any) => {
   return matches?.length ? matches[matches.length - 1] : text
 }
 const eventOf = (r: any) => { const e = r?.body?.eventID ? r.body : r; return { id: String(e?.eventID || ''), ctx: e?.eventContext || {}, data: e?.eventData || {} } }
-async function config(teamUUID: string): Promise<any> { return runtimeConfig[teamUUID] || (await configs.get(key(teamUUID))) || {} }
+async function config(teamUUID: string): Promise<any> { if (runtimeConfig[teamUUID]) return runtimeConfig[teamUUID]; try { return (await configs.get(key(teamUUID))) || {} } catch { return {} } }
 async function issueDetail(teamUUID: string, issueUUID: string): Promise<any> { const r: any = await OPFetch(`/project/api/project/team/${teamUUID}/issues/${issueUUID}`, { method: 'GET', teamUUID }); return r?.data || r }
 async function createProject(teamUUID: string, input: any, templateUUID: string): Promise<string> {
   const payload = { name: input.name, project_name: input.name, description: input.description || '', owner: input.owner || '', owner_uuid: input.owner || '', start_time: input.start_time || 0, end_time: input.end_time || 0, template_uuid: templateUUID, project_template_uuid: templateUUID }
