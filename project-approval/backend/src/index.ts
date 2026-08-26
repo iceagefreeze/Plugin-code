@@ -25,9 +25,9 @@ const normalizeId = (value: any) => {
 }
 const eventOf = (r: any) => { const e = r?.body?.eventID ? r.body : r; return { id: String(e?.eventID || ''), ctx: e?.eventContext || {}, data: e?.eventData || {} } }
 async function config(teamUUID: string): Promise<any> { return runtimeConfig[teamUUID] || (await configs.get(key(teamUUID))) || {} }
-async function issueDetail(teamUUID: string, issueUUID: string): Promise<any> { const r: any = await OPFetch({ url: `/project/api/project/team/${teamUUID}/issues/${issueUUID}`, method: 'GET' }); return r?.data || r }
+async function issueDetail(teamUUID: string, issueUUID: string): Promise<any> { const r: any = await OPFetch(`/project/api/project/team/${teamUUID}/issues/${issueUUID}`, { method: 'GET', teamUUID }); return r?.data || r }
 async function createProject(teamUUID: string, input: any, templateUUID: string): Promise<string> {
-  const r: any = await OPFetch({ url: `/project/api/project/team/${teamUUID}/projects`, method: 'POST', headers: { 'Content-Type': 'application/json' }, data: { name: input.name, description: input.description || '', owner: input.owner, start_time: input.start_time || 0, end_time: input.end_time || 0, template_uuid: templateUUID, project_type_uuid: input.project_type_uuid || '', project_type: input.project_type_name || '' } })
+  const r: any = await OPFetch(`/project/api/project/team/${teamUUID}/projects`, { method: 'POST', teamUUID, headers: { 'Content-Type': 'application/json' }, data: { name: input.name, description: input.description || '', owner: input.owner, start_time: input.start_time || 0, end_time: input.end_time || 0, template_uuid: templateUUID, project_type_uuid: input.project_type_uuid || '', project_type: input.project_type_name || '' } })
   const id = r?.project_uuid || r?.uuid || r?.data?.project_uuid || r?.data?.uuid
   if (!id) throw Object.assign(new Error('创建项目接口未返回项目 UUID'), { code: 'INVALID_RESPONSE' })
   return String(id)
