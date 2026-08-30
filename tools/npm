@@ -1,7 +1,6 @@
 #!/bin/sh
 if [ "$1" = "-v" ] || [ "$1" = "--version" ]; then
-  echo "10.9.2"
+  printf '%s\n' '10.0.0'
   exit 0
 fi
-echo "This compatibility wrapper only supports npm --version." >&2
-exit 1
+exec pnpm "$@"

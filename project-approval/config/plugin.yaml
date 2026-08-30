@@ -1,8 +1,8 @@
 service:
   app_id: project_approval_v2
   name: 立项审批
-  description: 立项审批通过后自动创建项目
-  version: 2.2.6
+  description: 立项审批通过后生成待创建记录，并在记录页创建项目
+  version: 2.3.60
   mode: team
   logo: null
   language: nodejs
@@ -16,6 +16,13 @@ service:
   policy:
     policy: simple
     target: ''
+oauth:
+  type:
+    - admin
+  scope:
+    - read:project:project
+    - write:project:project
+    - read:project:issue
 modules:
   - id: approval-settings
     moduleType: settings
@@ -46,6 +53,16 @@ apis:
       - POST
     url: /team/:teamUUID/records/retry
     function: retryRecord
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/records/confirm
+    function: confirmRecord
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/records/enrich
+    function: enrichRecord
 events:
   - eventType: ones:project:issue-status:changed
     function: onIssueStatusChanged
@@ -129,9 +146,17 @@ storage:
           type: text
           length: 64
           default: ''
+        project_identifier:
+          type: text
+          length: 64
+          default: ''
         project_name:
           type: text
           length: 256
+          default: ''
+        trigger_user_uuid:
+          type: text
+          length: 64
           default: ''
         project_type_uuid:
           type: text

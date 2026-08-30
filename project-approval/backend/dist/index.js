@@ -29762,14 +29762,19 @@ const _Fetch = {
   getOpenApiToken: getOpenApiToken$1,
   OPFetch: OPFetch$1
 };
+const FetchAsAdmin = _Fetch.FetchAsAdmin;
 const OPFetch = _Fetch.OPFetch;
+
+const Logger = _globalThis.onesEnv._Logger;
 
 const records = index.entity('appr_rec_v2');
 const configs = index.entity('appr_cfg_v2');
+// Fallback for environments where Entity Storage is unavailable.
+let runtimeConfig = {};
+const runtimeRecords = {};
 const ok = (data = null) => ({ body: { ok: true, data, error: null } });
 const fail = (code, message, statusCode = 400) => ({ statusCode, body: { ok: false, data: null, error: { code, message } } });
 const body = (r) => r?.body && typeof r.body === 'object' ? r.body : {};
-const user = (r) => String(r?.headers?.['ones-user-id'] || r?.headers?.['Ones-User-Id'] || r?.headers?.['ones-user-uuid'] || r?.headers?.['Ones-User-UUID'] || r?.user?.id || 'session');
 const team = (r) => {
     const fromParams = r?.params?.teamUUID || r?.params?.team_uuid;
     const fromUrl = String(r?.url || r?.path || '').split('?')[0].match(/\/team\/([A-Za-z0-9_-]+)/)?.[1];
@@ -29784,14 +29789,117 @@ const normalizeId = (value) => {
     return matches?.length ? matches[matches.length - 1] : text;
 };
 const eventOf = (r) => { const e = r?.body?.eventID ? r.body : r; return { id: String(e?.eventID || ''), ctx: e?.eventContext || {}, data: e?.eventData || {} }; };
-async function config(teamUUID) { return (await configs.get(key(teamUUID))) || {}; }
-async function issueDetail(teamUUID, issueUUID) { const r = await OPFetch({ url: `/project/api/project/team/${teamUUID}/issues/${issueUUID}`, method: 'GET' }); return r?.data || r; }
-async function createProject(teamUUID, input, templateUUID) {
-    const r = await OPFetch({ url: `/project/api/project/team/${teamUUID}/projects`, method: 'POST', headers: { 'Content-Type': 'application/json' }, data: { name: input.name, description: input.description || '', owner: input.owner, start_time: input.start_time || 0, end_time: input.end_time || 0, template_uuid: templateUUID, project_type_uuid: input.project_type_uuid || '', project_type: input.project_type_name || '' } });
-    const id = r?.project_uuid || r?.uuid || r?.data?.project_uuid || r?.data?.uuid;
-    if (!id)
-        throw Object.assign(new Error('创建项目接口未返回项目 UUID'), { code: 'INVALID_RESPONSE' });
-    return String(id);
+const triggerUserOf = (r) => { const e = r?.body?.eventID ? r.body : r; return String(e?.eventContext?.triggerUserID || e?.eventData?.triggerUserID || r?.trigger_user_id || ''); };
+async function config(teamUUID) { if (runtimeConfig[teamUUID])
+    return runtimeConfig[teamUUID]; try {
+    return (await configs.get(key(teamUUID))) || {};
+}
+catch {
+    return {};
+} }
+function responseData(response) {
+    return response?.data ?? response?.body ?? response;
+}
+function responseSummary(response) {
+    const value = responseData(response);
+    if (value == null)
+        return 'empty';
+    if (typeof value !== 'object')
+        return String(value).slice(0, 500);
+    try {
+        return JSON.stringify(value).slice(0, 1000);
+    }
+    catch {
+        return `keys=${Object.keys(value).join(',')}`;
+    }
+}
+async function issueDetail(teamUUID, issueUUID, req) {
+    const c = await config(teamUUID);
+    let mapping = {};
+    try {
+        mapping = JSON.parse(String(c.mapping_json || '{}'));
+    }
+    catch { }
+    const aliases = { '项目名称': 'Bukbqjpm', '立项名称': 'Bukbqjpm', '项目负责人': 'QE8d8KfA', '负责人': 'QE8d8KfA', '计划开始日期': 'field009', '计划完成日期': 'field010', '项目类型': 'cA3wKBQs', '项目类型（单选）': 'cA3wKBQs' };
+    const fields = Array.from(new Set(['Bukbqjpm', 'field009', 'field010', 'QE8d8KfA', 'cA3wKBQs', ...Object.values(mapping).map(x => aliases[String(x || '')] || String(x || ''))].filter(x => /^[A-Za-z0-9_]{6,64}$/.test(String(x)))));
+    const normalizeDetailForm = (raw) => {
+        const value = responseData(raw);
+        const form = value?.detail_form || value?.detailForm || value?.data?.detail_form || value?.data?.detailForm || value;
+        const properties = form?.properties || form?.fields || form?.field_values || form?.values || form?.form_items || value?.fields || {};
+        const list = Array.isArray(properties) ? properties.reduce((out, item) => {
+            const key = item?.field_uuid || item?.fieldUuid || item?.property_uuid || item?.uuid || item?.id || item?.key || item?.name;
+            const field = item?.field || item?.property || item;
+            if (key)
+                out[key] = field?.value ?? field?.displayValue ?? field?.display_value ?? field?.text ?? field;
+            if (item?.name && item?.name !== key)
+                out[item.name] = field?.value ?? field?.displayValue ?? field?.display_value ?? field?.text ?? field;
+            return out;
+        }, {}) : Object.entries(properties || {}).reduce((out, [key, item]) => {
+            out[key] = item;
+            return out;
+        }, {});
+        const name = form?.name || form?.title || value?.name || value?.title || list.field001?.value || list.field001;
+        return { name, properties: list };
+    };
+    const detailFormUrls = [
+        `/project/api/project/team/${teamUUID}/items/${issueUUID}/detail_form`,
+        `/project/api/project/team/${teamUUID}/issues/${issueUUID}/detail_form`,
+        `/project/api/ones-project/team/${teamUUID}/workitems/${issueUUID}/detail_form`,
+        `/project/api/project/team/${teamUUID}/tasks/${issueUUID}/detail_form`,
+    ];
+    for (const url of detailFormUrls) {
+        try {
+            const r = await OPFetch(url, { method: 'GET', teamUUID });
+            const normalized = normalizeDetailForm(r);
+            if (normalized.properties && (Object.keys(normalized.properties).length || normalized.name))
+                return normalized;
+        }
+        catch (e) {
+            Logger.info(`[立项审批] detail_form接口失败 url=${url} status=${e?.response?.status || ''} message=${e?.message || ''}`);
+        }
+    }
+    if (fields.length) {
+        try {
+            const query = `select uid(field001,${fields.join(',')},v$issue_path) from issue where uid(uuid) = uid('${issueUUID}');`;
+            const r = await OPFetch(`/project/api/ones-project/team/${teamUUID}/workitems/onesql`, { method: 'POST', teamUUID, data: { query } });
+            const item = r?.data?.[0]?.item || r?.body?.data?.[0]?.item || r?.data?.data?.[0]?.item;
+            if (item)
+                return { name: item.field001, properties: item };
+        }
+        catch (e) {
+            Logger.info(`[立项审批] ONESQL工作项详情失败 status=${e?.response?.status || ''} message=${e?.message || ''}`);
+        }
+    }
+    const urls = [
+        `/project/api/project/team/${teamUUID}/tasks/${issueUUID}`,
+        `/project/api/ones-project/team/${teamUUID}/tasks/${issueUUID}`,
+        `/project/api/project/team/${teamUUID}/issues/${issueUUID}`,
+    ];
+    let last;
+    for (const url of urls) {
+        try {
+            const r = await OPFetch(url, { method: 'GET', teamUUID });
+            const value = r?.body || r?.data || r;
+            if (value && typeof value === 'object')
+                return value;
+        }
+        catch (e) {
+            last = e;
+            Logger.info(`[立项审批] 工作项详情接口失败 url=${url} status=${e?.response?.status || ''} message=${e?.message || ''}`);
+        }
+    }
+    for (const url of [`/openapi/v2/project/issues/${issueUUID}`, `/openapi/v2/project/issue/${issueUUID}`]) {
+        try {
+            const r = await FetchAsAdmin(url, { method: 'GET', params: { teamID: teamUUID } });
+            const value = responseData(r);
+            if (value && typeof value === 'object')
+                return value;
+        }
+        catch (e) {
+            Logger.info(`[立项审批] 管理员OpenAPI工作项详情失败 url=${url} status=${e?.response?.status || ''} detail=${responseSummary(e?.response) || e?.message || ''}`);
+        }
+    }
+    throw Object.assign(new Error(`读取审批工作项失败：${last?.message || '接口不可用'}`), { code: 'ISSUE_DETAIL_FAILED' });
 }
 function singleSelect(value) {
     const v = Array.isArray(value) ? value[0] : value;
@@ -29799,73 +29907,135 @@ function singleSelect(value) {
         return { uuid: String(v.uuid || v.id || v.value || ''), name: String(v.name || v.label || v.displayValue || '') };
     return { uuid: '', name: String(v || '') };
 }
-function isApproved(c, s) { return (c.approved_status_uuid && s?.id === c.approved_status_uuid) || (!c.approved_status_uuid && String(s?.name || '').trim() === (c.approved_status_name || '已通过')); }
-async function run(teamUUID, issueUUID, eventID, retry = false) {
+function isApproved(c, s) { if (!s || typeof s === 'string' && !s.trim())
+    return false; const id = typeof s === 'object' ? String(s.id || s.uuid || s.statusID || s.statusUUID || '') : String(s); const name = typeof s === 'object' ? String(s.name || s.title || s.statusName || '') : String(s); const configured = String(c.approved_status_uuid || '').trim(); const configuredName = String(c.approved_status_name || '').trim(); return Boolean((configured && id === configured) || (!configured && id === 'C4GCmGyA') || (configuredName && name.trim() === configuredName) || (configuredName && typeof s === 'string' && s.trim() === configuredName)); }
+async function run(teamUUID, issueUUID, eventID, retry = false, request) {
     const c = await config(teamUUID);
-    if (!c.approval_project_uuid || !c.issue_type_uuid || !c.template_uuid)
-        throw new Error('插件尚未完成配置');
-    const existing = await records.get(issueUUID);
-    if (existing?.status === 'created')
-        return existing;
-    const now = Date.now();
-    await records.set(issueUUID, { ...(existing || {}), issue_uuid: issueUUID, team_uuid: teamUUID, event_id: eventID || existing?.event_id || '', status: 'creating', retry_count: Number(existing?.retry_count || 0) + (retry ? 1 : 0), updated_at: now });
+    c.template_uuid = c.template_uuid || 'waterfall';
+    let existing = runtimeRecords[issueUUID] || {};
     try {
-        const issue = await issueDetail(teamUUID, issueUUID);
-        const p = issue?.properties || issue?.data?.properties || {};
+        existing = (await records.get(issueUUID)) || existing;
+    }
+    catch { }
+    if (existing?.status === 'created' || existing?.status === 'pending' || existing?.status === 'creating') {
+        runtimeRecords[issueUUID] = existing;
+        return existing;
+    }
+    const now = Date.now();
+    runtimeRecords[issueUUID] = { ...(existing || {}), issue_uuid: issueUUID, team_uuid: teamUUID, event_id: eventID || existing?.event_id || '', status: 'creating', retry_count: Number(existing?.retry_count || 0) + (retry ? 1 : 0), updated_at: now };
+    try {
+        await records.set(issueUUID, runtimeRecords[issueUUID]);
+    }
+    catch { }
+    try {
+        let issue = {};
+        try {
+            issue = await issueDetail(teamUUID, issueUUID, request);
+        }
+        catch (e) {
+            Logger.info(`[立项审批] 跳过工作项详情读取 issue=${issueUUID} message=${e?.message || ''}`);
+        }
+        ;
+        const eventData = eventOf(request).data || {};
+        const p = { ...(eventData.properties || {}), ...(eventData.field_values || {}), ...(issue?.properties || issue?.data?.properties || {}) };
+        let mapping = {};
+        try {
+            mapping = JSON.parse(String(c.mapping_json || '{}'));
+        }
+        catch { }
+        const aliases = { '项目名称': 'Bukbqjpm', '立项名称': 'Bukbqjpm', '项目负责人': 'QE8d8KfA', '负责人': 'QE8d8KfA', '计划开始日期': 'field009', '计划完成日期': 'field010', '项目类型': 'cA3wKBQs', '项目类型（单选）': 'cA3wKBQs' };
+        const mapped = (target, fallback) => { const source = String(mapping[target] || fallback); const key = aliases[source] || source; return p[key]?.value ?? p[key]?.displayValue ?? p[key]; };
         const value = (name) => p[name]?.value ?? p[name]?.displayValue ?? p[name];
-        const name = String(issue?.name || issue?.title || value('立项名称') || '').trim();
-        const owner = String(value('项目负责人') || issue?.assignee || '').trim();
-        const projectType = singleSelect(value('项目类型') || value('project_type'));
-        if (!name || !owner)
-            throw Object.assign(new Error('立项单缺少项目名称或项目负责人'), { code: 'MISSING_FIELD' });
-        const projectUUID = await createProject(teamUUID, { name, owner, project_type_uuid: projectType.uuid, project_type_name: projectType.name, description: String(value('立项说明') || value('描述') || ''), start_time: value('计划开始日期'), end_time: value('计划结束日期') }, c.template_uuid);
-        const done = { issue_uuid: issueUUID, team_uuid: teamUUID, event_id: eventID || existing?.event_id || '', status: 'created', project_uuid: projectUUID, project_name: name, project_type_uuid: projectType.uuid, project_type_name: projectType.name, error_code: '', error_message: '', retry_count: Number(existing?.retry_count || 0) + (retry ? 1 : 0), updated_at: Date.now() };
-        await records.set(issueUUID, done);
-        return done;
+        const name = String(mapped('项目名称', '立项名称') || issue?.name || issue?.title || `立项项目-${issueUUID.slice(-8)}`).trim();
+        const owner = String(mapped('项目负责人', '项目负责人') || issue?.assignee || '').trim();
+        const projectType = singleSelect(mapped('项目类型（单选）', '项目类型') || value('project_type'));
+        const triggerUser = triggerUserOf(request);
+        if (!name)
+            throw Object.assign(new Error('立项单缺少项目名称'), { code: 'MISSING_FIELD' });
+        const pending = { issue_uuid: issueUUID, team_uuid: teamUUID, event_id: eventID || existing?.event_id || '', status: 'pending', project_uuid: '', project_name: name, project_type_uuid: projectType.uuid, project_type_name: projectType.name, trigger_user_uuid: triggerUser, error_code: '', error_message: '', retry_count: Number(existing?.retry_count || 0) + (retry ? 1 : 0), updated_at: Date.now() };
+        runtimeRecords[issueUUID] = pending;
+        try {
+            await records.set(issueUUID, pending);
+        }
+        catch { }
+        ;
+        Logger.info(`[立项审批] 已生成待创建记录 issue=${issueUUID}`);
+        return pending;
     }
     catch (e) {
-        const failed = { ...(await records.get(issueUUID) || {}), issue_uuid: issueUUID, team_uuid: teamUUID, status: 'failed', error_code: e?.code || 'CREATE_FAILED', error_message: e?.message || '创建项目失败', updated_at: Date.now() };
-        await records.set(issueUUID, failed);
+        const failed = { ...(runtimeRecords[issueUUID] || {}), issue_uuid: issueUUID, team_uuid: teamUUID, status: 'failed', error_code: e?.code || 'CREATE_FAILED', error_message: e?.message || '创建项目失败', updated_at: Date.now() };
+        runtimeRecords[issueUUID] = failed;
+        try {
+            await records.set(issueUUID, failed);
+        }
+        catch { }
         throw e;
     }
 }
-async function onIssueStatusChanged(req) { const e = eventOf(req), teamUUID = String(e.ctx.teamID || ''); if (!teamUUID || !e.data.issueID)
-    return ok({ ignored: true }); const c = await config(teamUUID); if (!c.approval_project_uuid || !c.issue_type_uuid || !isApproved(c, e.data.newStatus))
-    return ok({ ignored: true }); const issue = await issueDetail(teamUUID, e.data.issueID); const issueType = String(issue?.issue_type_uuid || issue?.issueTypeUUID || issue?.type_uuid || issue?.issueType?.uuid || ''); if (issueType && issueType !== c.issue_type_uuid)
-    return ok({ ignored: true }); if (issue?.project_uuid && issue.project_uuid !== c.approval_project_uuid)
-    return ok({ ignored: true }); try {
-    return ok(await run(teamUUID, String(e.data.issueID), e.id));
+async function onIssueStatusChanged(req) { const e = eventOf(req), teamUUID = String(e.ctx.teamID || e.ctx.teamUUID || e.data.teamID || team(req)); const issueID = String(e.data.issueID || e.data.issueUUID || e.data.id || ''); const status = e.data.newStatus || e.data.toStatus || e.data.targetStatus || e.data.status; const c = await config(teamUUID); Logger.info(`[立项审批] 收到状态事件 issue=${issueID} status=${JSON.stringify(status).slice(0, 500)} data=${JSON.stringify(e.data).slice(0, 1000)}`); if (!teamUUID || !issueID || !isApproved(c, status)) {
+    Logger.info(`[立项审批] 忽略非通过状态 issue=${issueID} status=${JSON.stringify(status).slice(0, 300)}`);
+    return ok({ ignored: true });
+} try {
+    const result = await run(teamUUID, issueID, e.id, false, req);
+    Logger.info(`[立项审批] 待创建记录已生成 issue=${issueID} status=${result.status}`);
+    return ok({ ...result, pending: result.status === 'pending' });
 }
-catch {
-    return ok({ status: 'failed', issue_uuid: e.data.issueID });
+catch (err) {
+    const message = `${err?.code || 'CREATE_FAILED'}: ${err?.message || '生成待创建记录失败'}${err?.detail ? `; ${err.detail}` : ''}`;
+    Logger.error(`[立项审批] 待创建记录生成失败 issue=${issueID} ${message}`);
+    throw new Error(message);
 } }
-async function getConfig(req) { return ok(await config(team(req))); }
+async function getConfig(req) { return ok({ approved_status_name: '已通过', approved_status_uuid: '', template_uuid: 'waterfall', mapping_json: '{}', ...(await config(team(req))) }); }
 async function saveConfig(req) { const teamUUID = team(req); if (!teamUUID)
-    return fail('MISSING_TEAM', '无法识别当前团队，请从团队插件配置页打开'); const b = body(req); const approvalProject = normalizeId(b.approval_project_uuid); const issueType = normalizeId(b.issue_type_uuid); const template = normalizeId(b.template_uuid); if (!approvalProject || !issueType || !template || (!b.approved_status_uuid && !b.approved_status_name))
-    return fail('INVALID_CONFIG', '审批项目、工作项类型、通过状态和模板均为必填'); try {
-    let mapping = '{}';
+    return fail('MISSING_TEAM', '无法识别当前团队，请从团队插件配置页打开'); const b = body(req); const approvalProject = normalizeId(b.approval_project_uuid); const issueType = normalizeId(b.issue_type_uuid); const template = normalizeId(b.template_uuid) || 'waterfall'; if (!approvalProject || !issueType || (!b.approved_status_uuid && !b.approved_status_name))
+    return fail('INVALID_CONFIG', '审批项目、工作项类型和通过状态均为必填'); let mapping = '{}'; try {
     if (typeof b.mapping_json === 'string') {
         JSON.parse(b.mapping_json);
         mapping = b.mapping_json.slice(0, 4096);
     }
     else if (b.mapping_json && typeof b.mapping_json === 'object')
         mapping = JSON.stringify(b.mapping_json).slice(0, 4096);
-    await configs.set(key(teamUUID), { team_uuid: teamUUID, approval_project_uuid: approvalProject, issue_type_uuid: issueType, approved_status_uuid: normalizeId(b.approved_status_uuid), approved_status_name: String(b.approved_status_name || '已通过').trim(), template_uuid: template, mapping_json: mapping });
-    return ok(await config(teamUUID));
 }
-catch (e) {
-    return fail('CONFIG_SAVE_FAILED', `配置保存失败：${e?.message || '服务器内部错误'}`, 500);
-} }
-async function listRecords(req) { const q = await records.query().limit(200).getMany(); return ok({ items: (q?.data || []).map((x) => ({ id: x.key, ...x.value })) }); }
-async function retryRecord(req) { if (!user(req))
-    return fail('UNAUTHENTICATED', '未识别到登录用户', 401); const id = String(body(req).issue_uuid || ''); if (!id)
-    return fail('INVALID_REQUEST', '缺少 issue_uuid'); try {
-    return ok(await run(team(req), id, `manual_${Date.now()}`, true));
+catch {
+    return fail('INVALID_CONFIG', '属性映射格式无效');
+} const value = { team_uuid: teamUUID, approval_project_uuid: approvalProject, issue_type_uuid: issueType, approved_status_uuid: normalizeId(b.approved_status_uuid), approved_status_name: String(b.approved_status_name || '').trim(), template_uuid: template, mapping_json: mapping }; runtimeConfig[teamUUID] = value; try {
+    await configs.set(key(teamUUID), value);
 }
-catch (e) {
-    return fail(e?.code || 'CREATE_FAILED', e?.message || '创建项目失败');
-} }
+catch { } return ok(value); }
+async function listRecords(req) {
+    try {
+        const q = await records.query().limit(200).getMany();
+        const rows = Array.isArray(q) ? q : (Array.isArray(q?.data) ? q.data : (Array.isArray(q?.data?.data) ? q.data.data : []));
+        const items = rows.map((x) => ({ id: x.key || x.id, ...(x.value || x) }));
+        // Include the in-process record when storage reads lag behind an event write.
+        for (const value of Object.values(runtimeRecords)) {
+            if (value?.team_uuid === team(req) && !items.some((item) => item.issue_uuid === value.issue_uuid))
+                items.push({ id: value.issue_uuid, ...value });
+        }
+        return ok({ items });
+    }
+    catch {
+        return ok({ items: Object.values(runtimeRecords).filter((x) => x?.team_uuid === team(req)) });
+    }
+}
+async function confirmRecord(req) { const b = body(req), issueUUID = String(b.issue_uuid || ''), projectUUID = String(b.project_uuid || ''), projectIdentifier = String(b.project_identifier || ''); if (!issueUUID || !projectUUID)
+    return fail('INVALID_REQUEST', '缺少审批单或项目 UUID'); const current = runtimeRecords[issueUUID] || await records.get(issueUUID) || {}; const done = { ...current, issue_uuid: issueUUID, team_uuid: team(req) || current.team_uuid || '', status: 'created', project_uuid: projectUUID, project_identifier: projectIdentifier, error_code: '', error_message: '', updated_at: Date.now() }; runtimeRecords[issueUUID] = done; try {
+    await records.set(issueUUID, done);
+}
+catch { } Logger.info(`[立项审批] 浏览器创建已确认 issue=${issueUUID} project=${projectUUID}`); return ok(done); }
+async function enrichRecord(req) { const b = body(req), issueUUID = String(b.issue_uuid || ''), projectName = String(b.project_name || '').trim(); if (!issueUUID || !projectName)
+    return fail('INVALID_REQUEST', '缺少审批单或项目名称'); const current = runtimeRecords[issueUUID] || await records.get(issueUUID) || {}; const next = { ...current, issue_uuid: issueUUID, team_uuid: team(req) || current.team_uuid || '', project_name: projectName, updated_at: Date.now() }; runtimeRecords[issueUUID] = next; try {
+    await records.set(issueUUID, next);
+}
+catch { } return ok(next); }
+async function retryRecord(req) { const id = String(body(req).issue_uuid || ''); const current = runtimeRecords[id] || await records.get(id) || {}; if (!id || !current.issue_uuid)
+    return fail('INVALID_REQUEST', '找不到待创建记录'); const pending = { ...current, status: 'pending', error_code: '', error_message: '', updated_at: Date.now() }; runtimeRecords[id] = pending; try {
+    await records.set(id, pending);
+}
+catch { } return ok(pending); }
 
+exports.confirmRecord = confirmRecord;
+exports.enrichRecord = enrichRecord;
 exports.getConfig = getConfig;
 exports.listRecords = listRecords;
 exports.onIssueStatusChanged = onIssueStatusChanged;

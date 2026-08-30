@@ -35,7 +35,9 @@ declare var ONESEntities: {
             event_id?: string;
             status?: string;
             project_uuid?: string;
+            project_identifier?: string;
             project_name?: string;
+            trigger_user_uuid?: string;
             project_type_uuid?: string;
             project_type_name?: string;
             error_code?: string;
