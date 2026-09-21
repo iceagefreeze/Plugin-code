@@ -1,0 +1,194 @@
+{
+  "app": {
+    "id": "app_c87f0cf45bfc4a8c",
+    "name": "project-approval-v2",
+    "version": "v0.1.0",
+    "desc": "立项审批通过后自动创建项目，并将审批单字段映射到新项目",
+    "logo": "/public/logo.svg",
+    "auth": {
+      "type": "jwt"
+    },
+    "lifecycle_callback": {
+      "install": "/install_cb"
+    },
+    "events": {
+      "url": "/events/webhook",
+      "types": [
+        {
+          "eventType": "ones:project:issue-status:changed"
+        }
+      ]
+    },
+    "oauth": {
+      "scope": [
+        "read:account:teams",
+        "read:project:project",
+        "write:project:project",
+        "read:project:issue"
+      ],
+      "type": ["user", "app"]
+    },
+    "extensions": {
+      "appSettingPages": [
+        {
+          "key": "entries",
+          "funcs": {
+            "customEntries": "/app_setting_entries"
+          }
+        }
+      ]
+    }
+  },
+  "ones": {
+    "storage": {
+      "entities": [
+        {
+          "name": "installation_secret",
+          "attributes": {
+            "installation_id": {
+              "type": "string",
+              "length": 128,
+              "required": true
+            },
+            "shared_secret": {
+              "type": "string",
+              "length": 512,
+              "required": true
+            },
+            "ones_base_url": {
+              "type": "string",
+              "length": 256,
+              "required": true
+            },
+            "updated_at": {
+              "type": "integer",
+              "required": true
+            }
+          }
+        },
+        {
+          "name": "approval_config",
+          "attributes": {
+            "team_uuid": {
+              "type": "string",
+              "length": 64,
+              "required": true
+            },
+            "approved_status_id": {
+              "type": "string",
+              "length": 64,
+              "default": ""
+            },
+            "approved_status_name": {
+              "type": "string",
+              "length": 128,
+              "default": ""
+            },
+            "project_template_id": {
+              "type": "string",
+              "length": 64,
+              "default": "comwater"
+            },
+            "name_field_id": {
+              "type": "string",
+              "length": 64,
+              "default": ""
+            },
+            "owner_field_id": {
+              "type": "string",
+              "length": 64,
+              "default": ""
+            },
+            "type_field_id": {
+              "type": "string",
+              "length": 64,
+              "default": ""
+            },
+            "type_project_field_id": {
+              "type": "string",
+              "length": 64,
+              "default": ""
+            },
+            "start_field_id": {
+              "type": "string",
+              "length": 64,
+              "default": ""
+            },
+            "end_field_id": {
+              "type": "string",
+              "length": 64,
+              "default": ""
+            },
+            "updated_at": {
+              "type": "integer",
+              "required": true
+            }
+          }
+        },
+        {
+          "name": "approval_record",
+          "attributes": {
+            "issue_uuid": {
+              "type": "string",
+              "length": 64,
+              "required": true
+            },
+            "team_uuid": {
+              "type": "string",
+              "length": 64,
+              "required": true
+            },
+            "event_id": {
+              "type": "string",
+              "length": 128,
+              "default": ""
+            },
+            "status": {
+              "type": "string",
+              "length": 16,
+              "default": "pending"
+            },
+            "project_uuid": {
+              "type": "string",
+              "length": 64,
+              "default": ""
+            },
+            "project_name": {
+              "type": "string",
+              "length": 256,
+              "default": ""
+            },
+            "project_identifier": {
+              "type": "string",
+              "length": 64,
+              "default": ""
+            },
+            "error_code": {
+              "type": "string",
+              "length": 64,
+              "default": ""
+            },
+            "error_message": {
+              "type": "text"
+            },
+            "created_at": {
+              "type": "integer",
+              "required": true
+            },
+            "updated_at": {
+              "type": "integer",
+              "required": true
+            }
+          }
+        }
+      ]
+    }
+  },
+  "runtime": {
+    "type": "ones-node-22",
+    "healthcheck": {
+      "path": "/health_check"
+    },
+    "command": ["node", "dist/backend/index.js"]
+  }
+}

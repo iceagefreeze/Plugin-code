@@ -1,0 +1,24 @@
+# Node/JS
+node_modules/
+dist/
+build/
+.vite/
+*.log
+.env*
+
+# Tooling
+coverage/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.codex
+
+.specify/
+.ones/
+specs/
+*.opkx
