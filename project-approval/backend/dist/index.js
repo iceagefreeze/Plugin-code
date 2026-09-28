@@ -29905,6 +29905,9 @@ async function run(teamUUID, issueUUID, eventID, retry = false, request) {
         const startDate = fieldText(mapped('开始日期', '')).slice(0, 10);
         const endDate = fieldText(mapped('结束日期', '')).slice(0, 10);
         const projectType = singleSelect(mapped('项目类型（单选）', '') || mapped('项目类型', ''));
+        Logger.info(`[立项审批] 字段值 fieldIDs=${Object.keys(p).join(',')}`);
+        Logger.info(`[立项审批] 映射 mapping=${JSON.stringify(mapping).slice(0, 400)}`);
+        Logger.info(`[立项审批] 提取结果 name=${name} owner=${owner} start=${startDate} end=${endDate} type=${projectType.uuid}/${projectType.name}`);
         const triggerUser = triggerUserOf(request);
         if (!name)
             throw Object.assign(new Error('立项单缺少项目名称'), { code: 'MISSING_FIELD' });
@@ -30071,11 +30074,22 @@ async function createProject(req) {
     if (!name)
         return fail('INVALID_REQUEST', '缺少项目名称');
     try {
+        Logger.info(`[立项审批] 创建项目请求 teamID=${teamUUID} name=${name} template=${templateID} members=${JSON.stringify(members)}`);
         const r = await FetchAsAdmin(`/openapi/v2/project/projects`, { method: 'POST', params: { teamID: teamUUID }, data: { name, templateID, members } });
         const value = responseData(r);
+        Logger.info(`[立项审批] 创建项目原始响应=${responseSummary(r).slice(0, 800)}`);
         const projectUUID = String(value?.id || value?.data?.id || '');
         if (!projectUUID)
-            return fail('CREATE_FAILED', `创建项目未返回项目 ID：${responseSummary(value).slice(0, 200)}`);
+            return fail('CREATE_FAILED', `创建项目未返回项目 ID：${responseSummary(r).slice(0, 300)}`);
+        // 创建后立即验证项目真实存在
+        try {
+            const check = await FetchAsAdmin(`/openapi/v2/project/projects/${projectUUID}`, { method: 'GET', params: { teamID: teamUUID } });
+            const cv = responseData(check);
+            Logger.info(`[立项审批] 创建后验证 project=${projectUUID} name=${cv?.name ?? cv?.data?.name ?? '?'} 响应=${responseSummary(check).slice(0, 300)}`);
+        }
+        catch (e) {
+            Logger.error(`[立项审批] 创建后验证失败 project=${projectUUID} status=${e?.response?.status || ''} ${e?.message || ''}`);
+        }
         Logger.info(`[立项审批] 项目创建成功 project=${projectUUID} name=${name} template=${templateID}`);
         return ok({ project_uuid: projectUUID });
     }
