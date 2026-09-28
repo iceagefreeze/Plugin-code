@@ -40,6 +40,13 @@ const api = async (path: string, data: any = {}) => {
 
 const dateValue = (value: any) => { if (!value) return ''; if (typeof value === 'number' || /^\d{10,}$/.test(String(value))) { const d = new Date(Number(value)); if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10) } return String(value).slice(0, 10) }
 
+// ---- 项目创建与验证（走前端同源内部接口，老版本已验证可靠）----
+const native = async (path: string, data: any) => json(await fetch(`/project/api/ones-project/team/${team()}${path}`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }), '项目创建接口')
+const uuid = () => Array.from({ length: 16 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 36)]).join('')
+// 内部模板枚举：配置页已直接存内部枚举；兜底回退瀑布（已验证）防止误配
+const KNOWN_TEMPLATES = new Set(['waterfall_development', 'agile_development', 'task_management'])
+const verifyProject = async (projectUUID: string) => { const id = team(); const paths = [`/project/api/project/team/${id}/project/${projectUUID}`, `/project/api/project/team/${id}/project/${projectUUID}/browse`]; for (const path of paths) for (const method of ['GET', 'POST']) try { const r = await fetch(path, { method, credentials: 'include', headers: method === 'POST' ? { 'Content-Type': 'application/json' } : undefined, body: method === 'POST' ? '{}' : undefined }); if (!r.ok) continue; const value: any = await r.json(); const data: any = value?.body || value?.data || value; if (data && typeof data === 'object' && (data.uuid || data.project_uuid || data.name || data.project)) return true } catch {} return false }
+
 // ---- 从配置读字段映射（消除硬编码字段 UUID）----
 let cachedConfig: any = null
 const loadConfig = async () => {
@@ -58,15 +65,20 @@ const updateProject = async (projectUUID: string, record: any) => {
   const { maps } = await loadConfig()
   const typeProjectField = String(maps['项目类型目标字段'] || '')
   const typeOption = await resolveTypeOption(record)
-  const customField: any = {}
-  if (typeProjectField && typeOption) customField[typeProjectField] = typeOption
-  const data: any = { project_uuid: projectUUID }
-  if (record.owner_uuid) data.owner = record.owner_uuid
-  if (record.start_date) data.planned_start_date = dateValue(record.start_date)
-  if (record.end_date) data.planned_end_date = dateValue(record.end_date)
-  if (Object.keys(customField).length) data.custom_field = customField
-  if (!data.owner && !data.planned_start_date && !data.planned_end_date && !Object.keys(customField).length) return
-  await api('/project/update', data)
+  const item: any = {}
+  if (record.owner_uuid) item.assign = record.owner_uuid
+  if (record.start_date) item.plan_start_time = new Date(dateValue(record.start_date)).getTime() / 1000
+  if (record.end_date) item.plan_end_time = new Date(dateValue(record.end_date)).getTime() / 1000
+  if (typeProjectField && typeOption) item[typeProjectField] = typeOption
+  if (Object.keys(item).length) {
+    try {
+      const r = await fetch(`/project/api/project/team/${team()}/item/project-${projectUUID}/update`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item }) })
+      const raw = await r.text()
+      let value: any = {}
+      try { value = raw ? JSON.parse(raw) : {} } catch {}
+      if (!r.ok || value?.error || value?.data?.error) throw Error(`项目属性更新失败（${r.status}）`)
+    } catch (e: any) { console.warn('[立项审批] 项目属性更新失败', e?.message || e) }
+  }
 }
 
 function App() {
@@ -80,26 +92,27 @@ function App() {
     const lockKey = `ones-project-approval:create:${record.issue_uuid}`
     if (sessionStorage.getItem(lockKey) === '1') return
     const knownProject = localStorage.getItem(lockKey)
-    if (knownProject) {
-      const v = await api('/project/verify', { project_uuid: knownProject })
-      if (v.exists) { await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: knownProject }); await load(); return }
-      localStorage.removeItem(lockKey)
-    }
+    if (knownProject && await verifyProject(knownProject)) { await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: knownProject }); await load(); return } localStorage.removeItem(lockKey)
     sessionStorage.setItem(lockKey, '1')
     setBusy(record.issue_uuid); setMessage(automatic ? '检测到待创建记录，正在创建项目…' : '正在创建项目…')
     try {
       const record2 = { ...record, project_name: record.project_name, owner_uuid: record.owner_uuid, start_date: record.start_date, end_date: record.end_date, project_type_uuid: record.project_type_uuid, project_type_name: record.project_type_name }
       const cfg2 = await loadConfig()
       const name = String(record2.project_name || record2.name || `立项项目-${String(record.issue_uuid).slice(-8)}`).trim()
-      const members = record.trigger_user_uuid ? [record.trigger_user_uuid] : []
-      const owner = String(record2.owner_uuid || '')
-      const created = await api('/project/create', { name, template_uuid: cfg2.template_uuid || 'project-t2', members, owner })
-      const projectUUID = String(created.project_uuid || '')
+      const configuredTemplate = String(cfg2.template_uuid || 'waterfall_development')
+      // 兜底：不认识/误配的模板回退到已验证的瀑布
+      const templateId = KNOWN_TEMPLATES.has(configuredTemplate) ? configuredTemplate : 'waterfall_development'
+      const generated = await native('/identifier', { name })
+      const identifier = String(generated.identifier || '')
+      if (!identifier) throw Error('未取得项目标识')
+      const checked = await native('/identifier/check', { identifier })
+      if (checked.is_duplicate) throw Error(`项目标识重复：${identifier}`)
+      const result = await native('/projects/add2', { uuid: uuid(), name, icon: 'i-ProjectFilled', identifier, keep_sample_data: true, members: record.trigger_user_uuid ? [record.trigger_user_uuid] : [], template_id: templateId })
+      const projectUUID = String(result.project_uuid || result?.uuid || '')
       if (!projectUUID) throw Error('创建接口未返回项目 UUID')
-      const projectIdentifier = String(created.identifier || '')
       localStorage.setItem(lockKey, projectUUID)
       await updateProject(projectUUID, record2)
-      await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: projectUUID, project_identifier: projectIdentifier })
+      await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: projectUUID, project_identifier: identifier })
       setMessage(`项目“${name}”已创建`); await load()
     } catch (error: any) { setMessage(`创建失败：${error?.message || '未知错误'}。请先刷新确认项目是否已生成。`) } finally { setBusy(''); sessionStorage.removeItem(lockKey) }
   }, [load])
