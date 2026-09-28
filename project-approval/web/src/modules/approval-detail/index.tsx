@@ -70,14 +70,16 @@ const updateProject = async (projectUUID: string, record: any) => {
   if (record.start_date) item.plan_start_time = new Date(dateValue(record.start_date)).getTime() / 1000
   if (record.end_date) item.plan_end_time = new Date(dateValue(record.end_date)).getTime() / 1000
   if (typeProjectField && typeOption) item[typeProjectField] = typeOption
-  if (Object.keys(item).length) {
-    try {
-      const r = await fetch(`/project/api/project/team/${team()}/item/project-${projectUUID}/update`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item }) })
-      const raw = await r.text()
-      let value: any = {}
-      try { value = raw ? JSON.parse(raw) : {} } catch {}
-      if (!r.ok || value?.error || value?.data?.error) throw Error(`项目属性更新失败（${r.status}）`)
-    } catch (e: any) { console.warn('[立项审批] 项目属性更新失败', e?.message || e) }
+  if (!Object.keys(item).length) return { ok: true, detail: '无字段可更新', item }
+  try {
+    const r = await fetch(`/project/api/project/team/${team()}/item/project-${projectUUID}/update`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item }) })
+    const raw = await r.text()
+    let value: any = {}
+    try { value = raw ? JSON.parse(raw) : {} } catch {}
+    const failed = !r.ok || value?.error || value?.data?.error || value?.body?.error
+    return { ok: !failed, detail: `status=${r.status} ${raw.slice(0, 300)}`, item }
+  } catch (e: any) {
+    return { ok: false, detail: String(e?.message || e), item }
   }
 }
 
@@ -115,9 +117,10 @@ function App() {
       // 健壮解析返回的项目 UUID（add2 用的就是客户端传入的 myUuid，兜底用它）
       const p: any = result || {}
       const projectUUID = String(p.project_uuid || p.uuid || p.project?.uuid || p.project?.project_uuid || p.data?.project_uuid || p.data?.uuid || myUuid)
-      await updateProject(projectUUID, record2)
+      const up = await updateProject(projectUUID, record2)
       await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: projectUUID, project_identifier: identifier })
-      setMessage(`项目“${name}”已创建`); await load()
+      const upInfo = up.ok ? '' : `（⚠ 字段映射失败：${up.detail}）`
+      setMessage(`项目“${name}”已创建${upInfo}；更新字段：${JSON.stringify(up.item)}`); await load()
     } catch (error: any) {
       setMessage(`创建失败：${error?.message || '未知错误'}。请先刷新确认项目是否已生成。`)
     } finally {
