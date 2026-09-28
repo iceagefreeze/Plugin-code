@@ -18,6 +18,17 @@ const gql = (q: string) => api('/items/graphql?t=issueTypes', { query: q, variab
 
 const input: any = { width: '100%', boxSizing: 'border-box', height: 44, padding: '0 12px', fontSize: 16, border: '1px solid #c9cdd3', borderRadius: 4 }
 
+// ONES 内置项目模板（templateID 平台固定枚举）
+const TEMPLATES = [
+  { uuid: 'comagile', name: '敏捷项目管理' },
+  { uuid: 'comwater', name: '瀑布项目规划' },
+  { uuid: 'project-t2', name: '通用任务管理' },
+  { uuid: 'project-t1', name: '敏捷项目管理（v1）' },
+  { uuid: 'project-t4', name: '瀑布项目规划（v1）' },
+  { uuid: 'project-t5', name: '敏捷项目管理 v2' },
+  { uuid: 'project-t6', name: '看板项目模板' },
+]
+
 function Picker({ label, value, items, onChange, placeholder }: { label: string, value: string, items: any[], onChange: (v: string) => void, placeholder?: string }) {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
@@ -66,8 +77,8 @@ function App() {
   const rows: Array<[string, string]> = [
     ['项目名称', '字段'],
     ['项目负责人', '字段'],
-    ['计划开始日期', '字段'],
-    ['计划完成日期', '字段'],
+    ['开始日期', '字段'],
+    ['结束日期', '字段'],
     ['立项说明 / 描述', '字段'],
     ['项目类型（单选）', '字段'],
   ]
@@ -81,7 +92,7 @@ function App() {
       <Picker label="选择立项审批单所属项目" value={f.approval_project_uuid || ''} items={projects} onChange={v => setF({ ...f, approval_project_uuid: v, issue_type_uuid: '' })} placeholder="输入关键词搜索项目" />
       <Picker label="选择立项审批单对应的工作项类型" value={f.issue_type_uuid || ''} items={types} onChange={v => setF({ ...f, issue_type_uuid: v })} placeholder="输入关键词搜索类型" />
       <Picker label="触发审批单状态（审批单流转到此状态时触发创建）" value={f.approved_status_uuid || ''} items={statuses} onChange={v => { const s = statuses.find(x => x.uuid === v); setF({ ...f, approved_status_uuid: v, approved_status_name: s?.name || '' }) }} placeholder="输入关键词搜索状态" />
-      <label>选择项目模板<select style={input} value={f.template_uuid || 'waterfall'} onChange={e => setF({ ...f, template_uuid: e.target.value })}><option value="waterfall">系统内置瀑布研发管理模板</option></select></label>
+      <label>选择项目模板<select style={input} value={f.template_uuid || 'comwater'} onChange={e => setF({ ...f, template_uuid: e.target.value })}>{TEMPLATES.map(t => <option key={t.uuid} value={t.uuid}>{t.name}</option>)}</select></label>
     </section> : <section style={{ border: '1px solid #ddd' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', padding: 16, background: '#f5f7fa', fontWeight: 700 }}><span>项目属性（新项目）</span><span>立项审批工作项属性（来源）</span></div>
       {rows.map(([target]) => <div key={target} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, padding: 14, borderTop: '1px solid #eee', alignItems: 'center' }}>

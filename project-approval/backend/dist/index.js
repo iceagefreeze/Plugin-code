@@ -29911,7 +29911,7 @@ function isApproved(c, s) { if (!s || typeof s === 'string' && !s.trim())
     return false; const id = typeof s === 'object' ? String(s.id || s.uuid || s.statusID || s.statusUUID || '') : String(s); const name = typeof s === 'object' ? String(s.name || s.title || s.statusName || '') : String(s); const configured = String(c.approved_status_uuid || '').trim(); const configuredName = String(c.approved_status_name || '').trim(); return Boolean((configured && id === configured) || (configuredName && name.trim() === configuredName) || (configuredName && typeof s === 'string' && s.trim() === configuredName)); }
 async function run(teamUUID, issueUUID, eventID, retry = false, request) {
     const c = await config(teamUUID);
-    c.template_uuid = c.template_uuid || 'waterfall';
+    c.template_uuid = c.template_uuid || 'comwater';
     let existing = runtimeRecords[issueUUID] || {};
     try {
         existing = (await records.get(issueUUID)) || existing;
@@ -29986,9 +29986,9 @@ catch (err) {
     Logger.error(`[立项审批] 待创建记录生成失败 issue=${issueID} ${message}`);
     throw new Error(message);
 } }
-async function getConfig(req) { return ok({ approved_status_name: '已通过', approved_status_uuid: '', template_uuid: 'waterfall', mapping_json: '{}', ...(await config(team(req))) }); }
+async function getConfig(req) { return ok({ approved_status_name: '已通过', approved_status_uuid: '', template_uuid: 'comwater', mapping_json: '{}', ...(await config(team(req))) }); }
 async function saveConfig(req) { const teamUUID = team(req); if (!teamUUID)
-    return fail('MISSING_TEAM', '无法识别当前团队，请从团队插件配置页打开'); const b = body(req); const approvalProject = normalizeId(b.approval_project_uuid); const issueType = normalizeId(b.issue_type_uuid); const template = normalizeId(b.template_uuid) || 'waterfall'; if (!approvalProject || !issueType || (!b.approved_status_uuid && !b.approved_status_name))
+    return fail('MISSING_TEAM', '无法识别当前团队，请从团队插件配置页打开'); const b = body(req); const approvalProject = normalizeId(b.approval_project_uuid); const issueType = normalizeId(b.issue_type_uuid); const template = normalizeId(b.template_uuid) || 'comwater'; if (!approvalProject || !issueType || (!b.approved_status_uuid && !b.approved_status_name))
     return fail('INVALID_CONFIG', '审批项目、工作项类型和通过状态均为必填'); let mapping = '{}'; try {
     if (typeof b.mapping_json === 'string') {
         JSON.parse(b.mapping_json);
@@ -30096,7 +30096,7 @@ async function listProjectFields(req) {
         const value = await openApiList(teamUUID, 'projectFields');
         const fields = value?.fields ?? value?.data?.fields ?? (Array.isArray(value) ? value : []);
         const arr = Array.isArray(fields) ? fields : [];
-        const items = arr.map((f) => ({ uuid: String(f.id ?? f.uuid ?? ''), name: String(f.name ?? ''), typeLabel: String(f.typeLabel ?? f.fieldTypeName ?? '') })).filter((x) => x.uuid && x.name);
+        const items = arr.map((f) => ({ uuid: String(f.id ?? f.uuid ?? ''), name: String(f.name ?? ''), typeLabel: String(f.typeLabel ?? f.fieldTypeName ?? ''), options: Array.isArray(f.options) ? f.options : [] })).filter((x) => x.uuid && x.name);
         Logger.info(`[立项审批] listProjectFields teamID=${teamUUID} 共 ${items.length} 个项目字段`);
         return ok({ items });
     }

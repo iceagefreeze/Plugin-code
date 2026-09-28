@@ -60,8 +60,8 @@ const enrich = async (record: any) => {
   const id = team()
   const { maps } = await loadConfig()
   const nameField = String(maps['项目名称'] || '')
-  const startField = String(maps['计划开始日期'] || '')
-  const endField = String(maps['计划完成日期'] || '')
+  const startField = String(maps['开始日期'] || '')
+  const endField = String(maps['结束日期'] || '')
   const ownerField = String(maps['项目负责人'] || '')
   const typeField = String(maps['项目类型（单选）'] || maps['项目类型'] || '')
   const fieldList = Array.from(new Set([nameField, startField, endField, ownerField, typeField].filter(x => /^[A-Za-z0-9_-]{6,64}$/.test(x))))
@@ -86,7 +86,7 @@ const enrich = async (record: any) => {
   return record
 }
 const findOptions = (value: any): any[] => { if (!value || typeof value !== 'object') return []; if (Array.isArray(value.options)) return value.options; for (const child of Object.values(value)) { const found = findOptions(child); if (found.length) return found } return [] }
-const resolveTypeOption = async (projectUUID: string, record: any) => { if (!record.source_type_name && !record.source_type) return ''; const id = team(); const paths = [`/item/project-${projectUUID}/fields`, `/item/project-${projectUUID}`, `/projects/${projectUUID}/fields`]; for (const path of paths) for (const method of ['GET', 'POST']) try { const r = await fetch(`/project/api/project/team/${id}${path}`, { method, credentials: 'include', headers: method === 'POST' ? { 'Content-Type': 'application/json' } : undefined, body: method === 'POST' ? '{}' : undefined }); if (!r.ok) continue; const value = await r.json(); const options = findOptions(value?.body || value?.data || value); const wanted = String(record.source_type_name || '').trim(); const match = options.find((o: any) => String(o?.value || o?.name || o?.label || '').trim() === wanted); if (match?.uuid) return String(match.uuid) } catch {} return String(record.source_type || '') }
+const resolveTypeOption = async (projectUUID: string, record: any) => { if (!record.source_type_name && !record.source_type) return ''; const { maps } = await loadConfig(); const typeProjectField = String(maps['项目类型目标字段'] || ''); const wanted = String(record.source_type_name || '').trim(); try { const data = await api('/project-fields/list'); const fields = Array.isArray(data?.items) ? data.items : []; const field = fields.find((f: any) => f.uuid === typeProjectField); const options = Array.isArray(field?.options) ? field.options : []; const match = options.find((o: any) => String(o?.value ?? o?.name ?? o?.id ?? o?.uuid ?? '').trim() === wanted); if (match) return String(match.uuid || match.id || '') } catch {} return String(record.source_type || '') }
 const updateProject = async (projectUUID: string, record: any) => {
   const item: any = {}
   if (record.source_start) item.plan_start_time = dateValue(record.source_start)
@@ -121,13 +121,13 @@ function App() {
     sessionStorage.setItem(lockKey, '1')
     setBusy(record.issue_uuid); setMessage(automatic ? '检测到待创建记录，正在创建项目…' : '正在创建项目…')
     try {
-      const enriched = await enrich(record); const name = String(enriched.project_name || `立项项目-${String(record.issue_uuid).slice(-8)}`)
+      const enriched = await enrich(record); const cfg2 = await loadConfig(); const name = String(enriched.project_name || `立项项目-${String(record.issue_uuid).slice(-8)}`)
       const generated = await native('/identifier', { name })
       const identifier = String(generated.identifier || '')
       if (!identifier) throw Error('未取得项目标识')
       const checked = await native('/identifier/check', { identifier })
       if (checked.is_duplicate) throw Error(`项目标识重复：${identifier}`)
-      const result = await native('/projects/add2', { uuid: uuid(), name, icon: 'i-ProjectFilled', identifier, keep_sample_data: true, members: record.trigger_user_uuid ? [record.trigger_user_uuid] : [], template_id: 'waterfall_development' })
+      const result = await native('/projects/add2', { uuid: uuid(), name, icon: 'i-ProjectFilled', identifier, keep_sample_data: true, members: record.trigger_user_uuid ? [record.trigger_user_uuid] : [], template_id: cfg2.template_uuid || 'comwater' })
       const projectUUID = String(result.project_uuid || '')
       if (!projectUUID) throw Error('创建接口未返回项目 UUID')
       localStorage.setItem(lockKey, projectUUID)
