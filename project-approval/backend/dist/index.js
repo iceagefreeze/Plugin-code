@@ -30088,7 +30088,7 @@ async function fieldOptions(teamUUID, fieldUUID, uuids) {
         const data = { field_uuid: fieldUUID, include_fields: ['uuid', 'value'], limit: 100 };
         if (uuids && uuids.length)
             data.uuids = uuids;
-        const r = await FetchAsAdmin('/openapi/v2/project/field/options', { method: 'POST', params: { teamID: teamUUID }, data });
+        const r = await FetchAsAdmin('/openapi/v3alpha/field/options', { method: 'POST', params: { teamID: teamUUID }, data });
         const value = responseData(r);
         const list = Array.isArray(value) ? value : (value?.list ?? value?.data ?? []);
         return (Array.isArray(list) ? list : []).map((o) => ({ uuid: String(o.uuid ?? o.id ?? ''), value: String(o.value ?? o.name ?? '') })).filter((o) => o.uuid);

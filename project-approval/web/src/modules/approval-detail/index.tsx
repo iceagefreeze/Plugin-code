@@ -90,10 +90,21 @@ function App() {
   const load = useCallback(async () => { const data = await api('/records/list'); const records = data.items || []; setItems(records); return records }, [])
   const create = useCallback(async (record: any, automatic = false) => {
     const lockKey = `ones-project-approval:create:${record.issue_uuid}`
-    if (sessionStorage.getItem(lockKey) === '1') return
+    const creatingKey = `${lockKey}:creating`
+    const now = Date.now()
+
+    // 1. 已有成功创建的项目 → 直接复用确认（不重新创建）
     const knownProject = localStorage.getItem(lockKey)
-    if (knownProject && await verifyProject(knownProject)) { await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: knownProject }); await load(); return } localStorage.removeItem(lockKey)
-    sessionStorage.setItem(lockKey, '1')
+    if (knownProject && !knownProject.startsWith('creating:')) {
+      await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: knownProject }); await load(); return
+    }
+
+    // 2. 有「创建中」全局锁且未超时（30 秒）→ 其他实例正在创建，跳过，防止并发重复创建
+    const creating = localStorage.getItem(creatingKey)
+    if (creating && now - Number(creating) < 30000) return
+
+    // 3. 设置「创建中」全局锁（localStorage 跨标签页/iframe 共享）
+    localStorage.setItem(creatingKey, String(now))
     setBusy(record.issue_uuid); setMessage(automatic ? '检测到待创建记录，正在创建项目…' : '正在创建项目…')
     try {
       const record2 = { ...record, project_name: record.project_name, owner_uuid: record.owner_uuid, start_date: record.start_date, end_date: record.end_date, project_type_uuid: record.project_type_uuid, project_type_name: record.project_type_name }
@@ -107,14 +118,24 @@ function App() {
       if (!identifier) throw Error('未取得项目标识')
       const checked = await native('/identifier/check', { identifier })
       if (checked.is_duplicate) throw Error(`项目标识重复：${identifier}`)
-      const result = await native('/projects/add2', { uuid: uuid(), name, icon: 'i-ProjectFilled', identifier, keep_sample_data: true, members: record.trigger_user_uuid ? [record.trigger_user_uuid] : [], template_id: templateId })
-      const projectUUID = String(result.project_uuid || result?.uuid || '')
-      if (!projectUUID) throw Error('创建接口未返回项目 UUID')
+      const myUuid = uuid()
+      const result = await native('/projects/add2', { uuid: myUuid, name, icon: 'i-ProjectFilled', identifier, keep_sample_data: true, members: record.trigger_user_uuid ? [record.trigger_user_uuid] : [], template_id: templateId })
+      // 健壮解析返回的项目 UUID（add2 用的就是客户端传入的 myUuid，兜底用它）
+      const p: any = result || {}
+      const projectUUID = String(p.project_uuid || p.uuid || p.project?.uuid || p.project?.project_uuid || p.data?.project_uuid || p.data?.uuid || myUuid)
       localStorage.setItem(lockKey, projectUUID)
       await updateProject(projectUUID, record2)
       await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: projectUUID, project_identifier: identifier })
       setMessage(`项目“${name}”已创建`); await load()
-    } catch (error: any) { setMessage(`创建失败：${error?.message || '未知错误'}。请先刷新确认项目是否已生成。`) } finally { setBusy(''); sessionStorage.removeItem(lockKey) }
+    } catch (error: any) {
+      setMessage(`创建失败：${error?.message || '未知错误'}。请先刷新确认项目是否已生成。`)
+      // 失败时清掉残留的项目锁，允许下次重试
+      const cur = localStorage.getItem(lockKey)
+      if (!cur || cur.startsWith('creating:')) localStorage.removeItem(lockKey)
+    } finally {
+      localStorage.removeItem(creatingKey)
+      setBusy('')
+    }
   }, [load])
 
   useEffect(() => { load().then((records) => {
