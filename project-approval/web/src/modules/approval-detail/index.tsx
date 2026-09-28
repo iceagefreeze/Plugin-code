@@ -61,26 +61,43 @@ const loadConfig = async () => {
 }
 
 const resolveTypeOption = async (record: any) => { const typeUuid = String(record.project_type_uuid || record.source_type || ''); const typeName = String(record.project_type_name || record.source_type_name || ''); if (!typeName && !typeUuid) return ''; const { maps } = await loadConfig(); const typeProjectField = String(maps['项目类型目标字段'] || ''); const wanted = typeName.trim(); try { const data = await api('/project-fields/list'); const fields = Array.isArray(data?.items) ? data.items : []; const field = fields.find((f: any) => f.uuid === typeProjectField); const options = Array.isArray(field?.options) ? field.options : []; const match = options.find((o: any) => String(o?.value ?? o?.name ?? o?.id ?? o?.uuid ?? o?.label ?? '').trim() === wanted); if (match) return String(match.uuid || match.id || '') } catch {} return typeUuid }
-const updateProject = async (projectUUID: string, record: any) => {
-  const { maps } = await loadConfig()
-  const typeProjectField = String(maps['项目类型目标字段'] || '')
-  const typeOption = await resolveTypeOption(record)
-  const item: any = {}
-  if (record.owner_uuid) item.assign = record.owner_uuid
-  if (record.start_date) item.plan_start_time = new Date(dateValue(record.start_date)).getTime() / 1000
-  if (record.end_date) item.plan_end_time = new Date(dateValue(record.end_date)).getTime() / 1000
-  if (typeProjectField && typeOption) item[typeProjectField] = typeOption
-  if (!Object.keys(item).length) return { ok: true, detail: '无字段可更新', item }
+const doUpdate = async (projectUUID: string, item: any) => {
   try {
     const r = await fetch(`/project/api/project/team/${team()}/item/project-${projectUUID}/update`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item }) })
     const raw = await r.text()
     let value: any = {}
     try { value = raw ? JSON.parse(raw) : {} } catch {}
     const failed = !r.ok || value?.error || value?.data?.error || value?.body?.error
-    return { ok: !failed, detail: `status=${r.status} ${raw.slice(0, 300)}`, item }
+    return { ok: !failed, detail: `status=${r.status} ${raw.slice(0, 260)}` }
   } catch (e: any) {
-    return { ok: false, detail: String(e?.message || e), item }
+    return { ok: false, detail: String(e?.message || e) }
   }
+}
+const updateProject = async (projectUUID: string, record: any) => {
+  const { maps } = await loadConfig()
+  const typeProjectField = String(maps['项目类型目标字段'] || '')
+  const typeOption = await resolveTypeOption(record)
+  const builtin: any = {}
+  if (record.owner_uuid) builtin.assign = record.owner_uuid
+  if (record.start_date) builtin.plan_start_time = new Date(dateValue(record.start_date)).getTime() / 1000
+  if (record.end_date) builtin.plan_end_time = new Date(dateValue(record.end_date)).getTime() / 1000
+  const custom: any = {}
+  if (typeProjectField && typeOption) custom[typeProjectField] = typeOption
+
+  // 内置字段 + 自定义字段一起写
+  const all = { ...builtin, ...custom }
+  if (Object.keys(all).length) {
+    const r1 = await doUpdate(projectUUID, all)
+    if (r1.ok) return { ok: true, detail: '全部字段更新成功', item: all }
+    // 若因自定义字段 NotFound 失败，降级只写内置字段
+    if (Object.keys(builtin).length) {
+      const r2 = await doUpdate(projectUUID, builtin)
+      if (r2.ok) return { ok: true, detail: `内置字段成功；自定义字段(${typeProjectField})失败：${r1.detail}`, item: builtin }
+      return { ok: false, detail: `内置字段也失败：${r2.detail}`, item: builtin }
+    }
+    return { ok: false, detail: r1.detail, item: all }
+  }
+  return { ok: true, detail: '无字段可更新', item: {} }
 }
 
 function App() {
