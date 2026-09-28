@@ -5,7 +5,7 @@ import type { InstallationInfo } from '@ones-open/node-sdk'
 import { OpenApiService } from './openapi.service'
 
 // ---- 事件类型（对应 ones:project:issue-status:changed）----
-export type IssueStatusChangedEvent = {
+export type ApprovalStatusChangedEvent = {
   eventID: string
   eventType: 'ones:project:issue-status:changed'
   timestamp: number
@@ -26,6 +26,8 @@ type ApprovalConfigEntity = {
   team_uuid: string
   approved_status_id: string
   approved_status_name: string
+  approval_project_uuid: string
+  approval_issue_type_id: string
   project_template_id: string
   name_field_id: string
   owner_field_id: string
@@ -102,12 +104,28 @@ export class ApprovalService {
   // ---- 安装凭据 ----
   async getInstallationInfo(): Promise<InstallationInfo | null> {
     try {
-      const all = await installationSecretEntity.query().limit(1).getMany()
-      const first = all?.data?.[0]
-      if (!first) return null
-      const v = first.value as any
+      // 优先取固定 key 'current'（install 回调每次覆盖），避免取到旧的失效凭据
+      const current = (await installationSecretEntity.get('current')) as any
+      if (current?.installation_id && current?.shared_secret && current?.ones_base_url) {
+        console.log(`[getInstallationInfo] 命中 current key, installation_id=${current.installation_id}`)
+        return { installation_id: current.installation_id, shared_secret: current.shared_secret, ones_base_url: current.ones_base_url }
+      }
+      // 兜底：取最新一条（updated_at 最大）
+      const all = await installationSecretEntity.query().limit(20).getMany()
+      const rows = all?.data ?? []
+      const sorted = rows
+        .map((r) => r.value as any)
+        .filter((v) => v?.installation_id && v?.shared_secret && v?.ones_base_url)
+        .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
+      if (!sorted.length) {
+        console.error('[getInstallationInfo] 无可用凭据（current 为空，且无历史记录）')
+        return null
+      }
+      const v = sorted[0]
+      console.log(`[getInstallationInfo] 兜底取最新, installation_id=${v.installation_id}`)
       return { installation_id: v.installation_id, shared_secret: v.shared_secret, ones_base_url: v.ones_base_url }
-    } catch {
+    } catch (e: any) {
+      console.error('[getInstallationInfo] 异常', e?.message)
       return null
     }
   }
@@ -128,6 +146,8 @@ export class ApprovalService {
       team_uuid: teamUUID,
       approved_status_id: '',
       approved_status_name: '',
+      approval_project_uuid: '',
+      approval_issue_type_id: '',
       project_template_id: 'comwater',
       name_field_id: '',
       owner_field_id: '',
@@ -142,13 +162,13 @@ export class ApprovalService {
     return merged
   }
 
-  // ---- 事件处理入口：判断是否通过状态，通过则触发创建 ----
-  async handleStatusChanged(event: IssueStatusChangedEvent): Promise<{ handled: boolean; reason?: string }> {
+  // ---- 事件处理入口：审批状态 = approved 即触发，含项目/类型校验 ----
+  async handleStatusChanged(event: ApprovalStatusChangedEvent): Promise<{ handled: boolean; reason?: string }> {
     const data = event.eventData ?? {}
     const teamUUID = String(data.teamID ?? '')
     const issueUUID = String(data.issueID ?? '')
-    const toStatus = data.toStatus
-    if (!teamUUID || !issueUUID || !toStatus?.id) {
+    const toStatusID = String(data.toStatus?.id ?? '')
+    if (!teamUUID || !issueUUID || !toStatusID) {
       return { handled: false, reason: 'missing team/issue/toStatus' }
     }
 
@@ -156,8 +176,8 @@ export class ApprovalService {
     if (!cfg?.approved_status_id) {
       return { handled: false, reason: 'no approval config or no approved status set' }
     }
-    if (toStatus.id !== cfg.approved_status_id) {
-      return { handled: false, reason: `toStatus ${toStatus.id} != approved ${cfg.approved_status_id}` }
+    if (toStatusID !== cfg.approved_status_id) {
+      return { handled: false, reason: `toStatus ${toStatusID} != approved ${cfg.approved_status_id}` }
     }
 
     // 幂等：同一 issue 已 created/pending 则跳过（至少一次投递 + 重复触发场景）
@@ -166,7 +186,7 @@ export class ApprovalService {
       return { handled: false, reason: `already ${existing.status}` }
     }
 
-    // 立即返回，后台执行创建逻辑（事件回调需快速返回）
+    // 立即返回，后台执行（含详情读取 + 项目/类型校验 + 创建）
     void this.createProjectForIssue(teamUUID, issueUUID, event.eventID, cfg).catch((err) => {
       console.error(`[approval] 后台创建失败 issue=${issueUUID}`, err)
     })
@@ -207,6 +227,17 @@ export class ApprovalService {
         { method: 'GET', query: { teamID: teamUUID } },
       )
       const issue = issueDetail?.data ?? issueDetail
+
+      // 项目/类型校验：定位审批单（只处理配置指定的审批项目 + 审批单类型）
+      const issueProjectID = String(issue?.project?.id ?? '')
+      const issueTypeID = String(issue?.issueType?.id ?? '')
+      if (cfg.approval_project_uuid && issueProjectID && issueProjectID !== cfg.approval_project_uuid) {
+        throw new Error(`工作项所属项目 ${issueProjectID} 不是配置的审批项目 ${cfg.approval_project_uuid}`)
+      }
+      if (cfg.approval_issue_type_id && issueTypeID && issueTypeID !== cfg.approval_issue_type_id) {
+        throw new Error(`工作项类型 ${issueTypeID} 不是配置的审批单类型 ${cfg.approval_issue_type_id}`)
+      }
+
       const fieldValues: Record<string, unknown> = {}
       for (const fv of (issue?.fieldValues ?? []) as Array<{ fieldID: string; value: unknown }>) {
         if (fv?.fieldID) fieldValues[fv.fieldID] = fv.value
@@ -317,6 +348,84 @@ export class ApprovalService {
       const rows = result?.data ?? []
       return rows.map((r) => r.value as ApprovalRecordEntity).filter((r) => !teamUUID || r.team_uuid === teamUUID)
     } catch {
+      return []
+    }
+  }
+
+  // ---- 配置页下拉：团队列表 ----
+  async listTeams(): Promise<Array<{ id: string; name: string }>> {
+    const install = await this.getInstallationInfo()
+    if (!install) return []
+    try {
+      const resp = await this.openApiService.callV2(install, '/account/teams', { method: 'GET' })
+      const teams = resp?.data?.teams ?? resp?.teams ?? []
+      return (Array.isArray(teams) ? teams : []).map((t: any) => ({ id: String(t.id ?? ''), name: String(t.name ?? '') }))
+    } catch (e: any) {
+      console.error('[approval] 获取团队列表失败', e?.message)
+      return []
+    }
+  }
+
+  // ---- 配置页下拉：项目列表 + 工作项类型列表 ----
+  async listProjects(teamUUID: string): Promise<Array<{ id: string; name: string }>> {
+    const install = await this.getInstallationInfo()
+    if (!install) {
+      console.error('[approval] 获取项目列表失败：无安装凭据')
+      return []
+    }
+    try {
+      // 分页拉全（默认 limit=50 会截断，项目多的团队搜不到后面的）
+      const all: Array<{ id: string; name: string }> = []
+      let cursor: string | undefined
+      let guard = 0
+      do {
+        const resp = await this.openApiService.callV2(install, '/project/projects', {
+          method: 'GET',
+          query: { teamID: teamUUID, limit: '100', cursor },
+        })
+        const list = resp?.data?.list ?? resp?.data ?? resp?.list ?? []
+        const arr = Array.isArray(list) ? list : []
+        for (const p of arr) all.push({ id: String(p.id ?? ''), name: String(p.name ?? '') })
+        const pageInfo = resp?.data?.pageInfo ?? resp?.pageInfo
+        cursor = pageInfo?.hasNextPage ? pageInfo?.endCursor : undefined
+        guard += 1
+        if (!pageInfo?.hasNextPage) break
+      } while (cursor && guard < 50)
+      console.log(`[approval] listProjects teamID=${teamUUID} 共 ${all.length} 个项目`)
+      return all
+    } catch (e: any) {
+      console.error('[approval] 获取项目列表失败 teamID=' + teamUUID, e?.message)
+      return []
+    }
+  }
+
+  async listIssueTypes(teamUUID: string): Promise<Array<{ id: string; name: string }>> {
+    const install = await this.getInstallationInfo()
+    if (!install) {
+      console.error('[approval] 获取类型列表失败：无安装凭据')
+      return []
+    }
+    try {
+      const all: Array<{ id: string; name: string }> = []
+      let cursor: string | undefined
+      let guard = 0
+      do {
+        const resp = await this.openApiService.callV2(install, '/project/issueTypes', {
+          method: 'GET',
+          query: { teamID: teamUUID, limit: '100', cursor },
+        })
+        const list = resp?.data?.list ?? resp?.data ?? resp?.list ?? []
+        const arr = Array.isArray(list) ? list : []
+        for (const t of arr) all.push({ id: String(t.id ?? ''), name: String(t.name ?? '') })
+        const pageInfo = resp?.data?.pageInfo ?? resp?.pageInfo
+        cursor = pageInfo?.hasNextPage ? pageInfo?.endCursor : undefined
+        guard += 1
+        if (!pageInfo?.hasNextPage) break
+      } while (cursor && guard < 50)
+      console.log(`[approval] listIssueTypes teamID=${teamUUID} 共 ${all.length} 个类型`)
+      return all
+    } catch (e: any) {
+      console.error('[approval] 获取工作项类型列表失败 teamID=' + teamUUID, e?.message)
       return []
     }
   }

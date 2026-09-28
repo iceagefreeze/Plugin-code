@@ -4,6 +4,106 @@ import { ONES } from '@ones-open/web-sdk'
 
 type Option = { id: string; name: string }
 
+// 可搜索下拉：原生 select 数据多时难选，用「输入框过滤 + 下拉列表」替代
+const SearchableSelect = ({
+  value,
+  onChange,
+  options,
+  placeholder,
+  filter,
+}: {
+  value: string
+  onChange: (id: string) => void
+  options: Option[]
+  placeholder: string
+  filter?: (opt: Option) => boolean
+}) => {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const filtered = options.filter((o) => {
+    if (filter && !filter(o)) return false
+    if (!query) return true
+    return o.name.toLowerCase().includes(query.toLowerCase()) || o.id.toLowerCase().includes(query.toLowerCase())
+  })
+  const selected = options.find((o) => o.id === value)
+  return (
+    <div style={{ position: 'relative' }}>
+      <div
+        onClick={() => setOpen(!open)}
+        style={{
+          width: '100%',
+          padding: '6px 8px',
+          boxSizing: 'border-box',
+          border: '1px solid #ddd',
+          borderRadius: 4,
+          cursor: 'pointer',
+          background: '#fff',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <span style={{ color: selected ? '#333' : '#999' }}>{selected ? selected.name : placeholder}</span>
+        <span style={{ color: '#999' }}>▾</span>
+      </div>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            zIndex: 100,
+            top: '100%',
+            left: 0,
+            width: '100%',
+            background: '#fff',
+            border: '1px solid #ddd',
+            borderRadius: 4,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+            maxHeight: 240,
+            overflowY: 'auto',
+            marginTop: 2,
+          }}
+        >
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="搜索…"
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              boxSizing: 'border-box',
+              border: 'none',
+              borderBottom: '1px solid #eee',
+              outline: 'none',
+            }}
+          />
+          {filtered.map((o) => (
+            <div
+              key={o.id}
+              onClick={() => {
+                onChange(o.id)
+                setOpen(false)
+                setQuery('')
+              }}
+              style={{
+                padding: '6px 8px',
+                cursor: 'pointer',
+                fontSize: 13,
+                background: o.id === value ? '#eef4ff' : '#fff',
+              }}
+              onMouseEnter={(e) => ((e.target as HTMLElement).style.background = '#f0f5ff')}
+              onMouseLeave={(e) => ((e.target as HTMLElement).style.background = o.id === value ? '#eef4ff' : '#fff')}
+            >
+              {o.name}
+            </div>
+          ))}
+          {filtered.length === 0 && <div style={{ padding: 8, color: '#999', fontSize: 13 }}>无匹配项</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const App = () => {
   const [teamUUID, setTeamUUID] = useState('')
   const [loading, setLoading] = useState(false)
@@ -13,9 +113,15 @@ const App = () => {
   const [statuses, setStatuses] = useState<Option[]>([])
   const [issueFields, setIssueFields] = useState<any[]>([])
   const [projectFields, setProjectFields] = useState<any[]>([])
+  const [projects, setProjects] = useState<Option[]>([])
+  const [issueTypes, setIssueTypes] = useState<Option[]>([])
+  const [teams, setTeams] = useState<Option[]>([])
+  const [errors, setErrors] = useState<string[]>([])
 
   const [config, setConfig] = useState<any>({
     approved_status_id: '',
+    approval_project_uuid: '',
+    approval_issue_type_id: '',
     project_template_id: 'comwater',
     name_field_id: '',
     owner_field_id: '',
@@ -25,12 +131,27 @@ const App = () => {
     end_field_id: '',
   })
 
+  // 首次：拉团队列表（组织级应用无团队上下文，需用户显式选择）
   useEffect(() => {
     const loadingEl = document.querySelector('.ones-app-loading')
     loadingEl?.remove()
     void (async () => {
-      const teamInfo = await ONES.getTeamInfo()
-      setTeamUUID(teamInfo.teamUUID || '')
+      try {
+        const teamsResp = await (await ONES.fetchApp('/api/options/teams')).json()
+        const list: Option[] = teamsResp?.list ?? []
+        setTeams(list)
+        // 尝试用 Web SDK 的团队信息做默认值
+        try {
+          const teamInfo = await ONES.getTeamInfo()
+          if (teamInfo.teamUUID && list.some((t) => t.id === teamInfo.teamUUID)) {
+            setTeamUUID(teamInfo.teamUUID)
+          }
+        } catch {
+          /* ignore */
+        }
+      } catch {
+        setErrors(['无法获取团队列表'])
+      }
     })()
   }, [])
 
@@ -38,17 +159,38 @@ const App = () => {
     if (!teamUUID) return
     setLoading(true)
     setMessage('')
+    setErrors([])
     try {
       const cfgResp = await (await ONES.fetchApp(`/api/config?team_uuid=${teamUUID}`)).json()
       if (cfgResp?.ok && cfgResp.config) setConfig((c: any) => ({ ...c, ...cfgResp.config }))
-      const [statusResp, issueFieldsResp, projectFieldsResp] = await Promise.all([
-        (await ONES.fetchApp(`/api/options/statuses?team_uuid=${teamUUID}`)).json(),
-        (await ONES.fetchApp(`/api/options/issue-fields?team_uuid=${teamUUID}`)).json(),
-        (await ONES.fetchApp(`/api/options/project-fields?team_uuid=${teamUUID}`)).json(),
+
+      const fetchOpt = async (path: string) => {
+        try {
+          return await (await ONES.fetchApp(`${path}?team_uuid=${teamUUID}`)).json()
+        } catch (e: any) {
+          return { ok: false, error: `${path} 请求失败: ${e?.message}` }
+        }
+      }
+      const [statusResp, projectsResp, issueTypesResp, issueFieldsResp, projectFieldsResp] = await Promise.all([
+        fetchOpt('/api/options/statuses'),
+        fetchOpt('/api/options/projects'),
+        fetchOpt('/api/options/issue-types'),
+        fetchOpt('/api/options/issue-fields'),
+        fetchOpt('/api/options/project-fields'),
       ])
-      setStatuses((statusResp?.list ?? []).map((s: any) => ({ id: s.id, name: s.name })))
-      setIssueFields(issueFieldsResp?.list ?? [])
-      setProjectFields(projectFieldsResp?.list ?? [])
+
+      const errs: string[] = []
+      if (statusResp?.ok) setStatuses((statusResp.list ?? []).map((s: any) => ({ id: s.id, name: s.name })))
+      else errs.push(`状态列表：${statusResp?.error}`)
+      if (projectsResp?.ok) setProjects(projectsResp.list ?? [])
+      else errs.push(`项目列表：${projectsResp?.error}`)
+      if (issueTypesResp?.ok) setIssueTypes(issueTypesResp.list ?? [])
+      else errs.push(`工作项类型列表：${issueTypesResp?.error}`)
+      if (issueFieldsResp?.ok) setIssueFields(issueFieldsResp.list ?? [])
+      else errs.push(`工作项字段列表：${issueFieldsResp?.error}`)
+      if (projectFieldsResp?.ok) setProjectFields(projectFieldsResp.list ?? [])
+      else errs.push(`项目字段列表：${projectFieldsResp?.error}`)
+      setErrors(errs)
     } catch (e: any) {
       setMessage(`加载失败：${e?.message}`)
     } finally {
@@ -82,6 +224,7 @@ const App = () => {
   }
 
   const set = (key: string) => (e: any) => setConfig((c: any) => ({ ...c, [key]: e.target.value }))
+  const setOpt = (key: string) => (id: string) => setConfig((c: any) => ({ ...c, [key]: id }))
 
   const fieldStyle: React.CSSProperties = {
     width: '100%',
@@ -94,29 +237,81 @@ const App = () => {
   const groupStyle: React.CSSProperties = { marginBottom: 16 }
 
   const pickOptions = (fields: any[]) =>
-    fields.map((f: any) => ({ id: f.id, name: `${f.name}${f.typeLabel ? ` (${f.typeLabel})` : ''}` }))
+    fields.map((f: any) => {
+      const typeLabel = f.typeLabel || f.fieldTypeName || f.fieldType || ''
+      return { id: f.id, name: `${f.name}${typeLabel ? ` (${typeLabel})` : ''}`, typeLabel }
+    })
 
   return (
-    <div style={{ padding: 24, fontFamily: 'sans-serif', maxWidth: 720 }}>
+    <div style={{ padding: 24, fontFamily: 'sans-serif', maxWidth: 720, margin: '0 auto', height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
       <h2>立项审批配置</h2>
       <p style={{ color: '#666', fontSize: 13 }}>
         审批单流转到「通过状态」时，自动创建项目并把审批单字段映射到新项目。
       </p>
 
-      {loading ? (
+      {errors.length > 0 && (
+        <div style={{ background: '#fdecea', border: '1px solid #f5c6cb', borderRadius: 6, padding: '8px 12px', fontSize: 12, marginBottom: 16 }}>
+          <strong>部分选项加载失败（通常是缺少 scope 权限或安装凭据未就绪）：</strong>
+          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+            {errors.map((e) => (
+              <li key={e} style={{ color: '#c0392b' }}>{e}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div style={groupStyle}>
+        <label style={labelStyle}>团队（先选团队，再配项目/状态/字段）</label>
+        <SearchableSelect
+          value={teamUUID}
+          onChange={(id) => {
+            setTeamUUID(id)
+            // 切换团队后清空旧的选项和配置，重新加载
+            setProjects([])
+            setIssueTypes([])
+            setStatuses([])
+            setIssueFields([])
+            setProjectFields([])
+          }}
+          options={teams}
+          placeholder="请选择团队…"
+        />
+      </div>
+
+      {!teamUUID ? (
+        <p style={{ color: '#999' }}>请先在上方选择团队。</p>
+      ) : loading ? (
         <p>加载中…</p>
       ) : (
         <>
           <div style={groupStyle}>
+            <label style={labelStyle}>审批项目（用于定位审批单）</label>
+            <SearchableSelect
+              value={config.approval_project_uuid}
+              onChange={setOpt('approval_project_uuid')}
+              options={projects}
+              placeholder="请选择…"
+            />
+          </div>
+
+          <div style={groupStyle}>
+            <label style={labelStyle}>审批单工作项类型（用于定位审批单）</label>
+            <SearchableSelect
+              value={config.approval_issue_type_id}
+              onChange={setOpt('approval_issue_type_id')}
+              options={issueTypes}
+              placeholder="请选择…"
+            />
+          </div>
+
+          <div style={groupStyle}>
             <label style={labelStyle}>审批通过状态</label>
-            <select style={fieldStyle} value={config.approved_status_id} onChange={set('approved_status_id')}>
-              <option value="">请选择…</option>
-              {statuses.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              value={config.approved_status_id}
+              onChange={setOpt('approved_status_id')}
+              options={statuses}
+              placeholder="请选择…"
+            />
           </div>
 
           <div style={groupStyle}>
@@ -134,50 +329,42 @@ const App = () => {
 
           <div style={groupStyle}>
             <label style={labelStyle}>项目名称 ← 审批单字段（留空用工作项标题）</label>
-            <select style={fieldStyle} value={config.name_field_id} onChange={set('name_field_id')}>
-              <option value="">（用工作项标题）</option>
-              {pickOptions(issueFields).map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              value={config.name_field_id}
+              onChange={setOpt('name_field_id')}
+              options={pickOptions(issueFields)}
+              placeholder="（用工作项标题）"
+            />
           </div>
 
           <div style={groupStyle}>
             <label style={labelStyle}>项目负责人 ← 审批单字段（留空用工作项负责人）</label>
-            <select style={fieldStyle} value={config.owner_field_id} onChange={set('owner_field_id')}>
-              <option value="">（用工作项负责人）</option>
-              {pickOptions(issueFields).map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              value={config.owner_field_id}
+              onChange={setOpt('owner_field_id')}
+              options={pickOptions(issueFields)}
+              placeholder="（用工作项负责人）"
+            />
           </div>
 
           <div style={groupStyle}>
             <label style={labelStyle}>计划开始日期 ← 审批单字段（留空用系统计划开始日期）</label>
-            <select style={fieldStyle} value={config.start_field_id} onChange={set('start_field_id')}>
-              <option value="">（用系统计划开始日期）</option>
-              {pickOptions(issueFields).map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              value={config.start_field_id}
+              onChange={setOpt('start_field_id')}
+              options={pickOptions(issueFields)}
+              placeholder="（用系统计划开始日期）"
+            />
           </div>
 
           <div style={groupStyle}>
             <label style={labelStyle}>计划完成日期 ← 审批单字段（留空用系统计划完成日期）</label>
-            <select style={fieldStyle} value={config.end_field_id} onChange={set('end_field_id')}>
-              <option value="">（用系统计划完成日期）</option>
-              {pickOptions(issueFields).map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              value={config.end_field_id}
+              onChange={setOpt('end_field_id')}
+              options={pickOptions(issueFields)}
+              placeholder="（用系统计划完成日期）"
+            />
           </div>
 
           <div style={{ border: '1px solid #eee', padding: '12px 12px 0', borderRadius: 6, marginBottom: 16 }}>
@@ -186,29 +373,26 @@ const App = () => {
             </p>
             <div style={groupStyle}>
               <label style={labelStyle}>项目类型 ← 审批单字段</label>
-              <select style={fieldStyle} value={config.type_field_id} onChange={set('type_field_id')}>
-                <option value="">（不映射）</option>
-                {issueFields
-                  .filter((f: any) => (f.typeLabel || '').includes('select') || f.options)
-                  .map((f: any) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name}
-                    </option>
-                  ))}
-              </select>
+              <SearchableSelect
+                value={config.type_field_id}
+                onChange={setOpt('type_field_id')}
+                options={pickOptions(issueFields)}
+                placeholder="（不映射）"
+                filter={(f: any) => {
+                  const t = String(f.typeLabel || '').toLowerCase()
+                  return t.includes('select') || t.includes('单选') || t.includes('多选') || t.includes('option')
+                }}
+              />
             </div>
             <div style={groupStyle}>
               <label style={labelStyle}>项目类型 → 目标项目自定义字段</label>
-              <select style={fieldStyle} value={config.type_project_field_id} onChange={set('type_project_field_id')}>
-                <option value="">（不映射）</option>
-                {projectFields
-                  .filter((f: any) => !f.builtIn && (f.typeLabel || '').includes('option'))
-                  .map((f: any) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name}
-                    </option>
-                  ))}
-              </select>
+              <SearchableSelect
+                value={config.type_project_field_id}
+                onChange={setOpt('type_project_field_id')}
+                options={pickOptions(projectFields)}
+                placeholder="（不映射）"
+                filter={(f) => (f.name || '').includes('option') || f.name.includes('单选')}
+              />
             </div>
           </div>
 

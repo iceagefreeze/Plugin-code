@@ -29820,8 +29820,8 @@ async function issueDetail(teamUUID, issueUUID, req) {
         mapping = JSON.parse(String(c.mapping_json || '{}'));
     }
     catch { }
-    const aliases = { '项目名称': 'Bukbqjpm', '立项名称': 'Bukbqjpm', '项目负责人': 'QE8d8KfA', '负责人': 'QE8d8KfA', '计划开始日期': 'field009', '计划完成日期': 'field010', '项目类型': 'cA3wKBQs', '项目类型（单选）': 'cA3wKBQs' };
-    const fields = Array.from(new Set(['Bukbqjpm', 'field009', 'field010', 'QE8d8KfA', 'cA3wKBQs', ...Object.values(mapping).map(x => aliases[String(x || '')] || String(x || ''))].filter(x => /^[A-Za-z0-9_]{6,64}$/.test(String(x)))));
+    const fieldUUIDs = Object.values(mapping).map((x) => String(x || '')).filter((x) => /^[A-Za-z0-9_-]{6,64}$/.test(x));
+    const fields = Array.from(new Set(fieldUUIDs));
     const normalizeDetailForm = (raw) => {
         const value = responseData(raw);
         const form = value?.detail_form || value?.detailForm || value?.data?.detail_form || value?.data?.detailForm || value;
@@ -29908,7 +29908,7 @@ function singleSelect(value) {
     return { uuid: '', name: String(v || '') };
 }
 function isApproved(c, s) { if (!s || typeof s === 'string' && !s.trim())
-    return false; const id = typeof s === 'object' ? String(s.id || s.uuid || s.statusID || s.statusUUID || '') : String(s); const name = typeof s === 'object' ? String(s.name || s.title || s.statusName || '') : String(s); const configured = String(c.approved_status_uuid || '').trim(); const configuredName = String(c.approved_status_name || '').trim(); return Boolean((configured && id === configured) || (!configured && id === 'C4GCmGyA') || (configuredName && name.trim() === configuredName) || (configuredName && typeof s === 'string' && s.trim() === configuredName)); }
+    return false; const id = typeof s === 'object' ? String(s.id || s.uuid || s.statusID || s.statusUUID || '') : String(s); const name = typeof s === 'object' ? String(s.name || s.title || s.statusName || '') : String(s); const configured = String(c.approved_status_uuid || '').trim(); const configuredName = String(c.approved_status_name || '').trim(); return Boolean((configured && id === configured) || (configuredName && name.trim() === configuredName) || (configuredName && typeof s === 'string' && s.trim() === configuredName)); }
 async function run(teamUUID, issueUUID, eventID, retry = false, request) {
     const c = await config(teamUUID);
     c.template_uuid = c.template_uuid || 'waterfall';
@@ -29943,12 +29943,13 @@ async function run(teamUUID, issueUUID, eventID, retry = false, request) {
             mapping = JSON.parse(String(c.mapping_json || '{}'));
         }
         catch { }
-        const aliases = { '项目名称': 'Bukbqjpm', '立项名称': 'Bukbqjpm', '项目负责人': 'QE8d8KfA', '负责人': 'QE8d8KfA', '计划开始日期': 'field009', '计划完成日期': 'field010', '项目类型': 'cA3wKBQs', '项目类型（单选）': 'cA3wKBQs' };
-        const mapped = (target, fallback) => { const source = String(mapping[target] || fallback); const key = aliases[source] || source; return p[key]?.value ?? p[key]?.displayValue ?? p[key]; };
-        const value = (name) => p[name]?.value ?? p[name]?.displayValue ?? p[name];
-        const name = String(mapped('项目名称', '立项名称') || issue?.name || issue?.title || `立项项目-${issueUUID.slice(-8)}`).trim();
-        const owner = String(mapped('项目负责人', '项目负责人') || issue?.assignee || '').trim();
-        const projectType = singleSelect(mapped('项目类型（单选）', '项目类型') || value('project_type'));
+        // 映射值存字段 UUID（配置页动态选择）；兼容旧配置里存的中文字段名（按名称取值）
+        const mapped = (target, fallback) => { const raw = String(mapping[target] || fallback || '').trim(); if (!raw)
+            return undefined; const v = p[raw]; return v?.value ?? v?.displayValue ?? v?.display_value ?? v; };
+        const value = (name) => { const v = p[name]; return v?.value ?? v?.displayValue ?? v?.display_value ?? v; };
+        const name = String(mapped('项目名称', '') || issue?.name || issue?.title || `立项项目-${issueUUID.slice(-8)}`).trim();
+        const owner = String(mapped('项目负责人', '') || issue?.assignee || '').trim();
+        const projectType = singleSelect(mapped('项目类型（单选）', '') || mapped('项目类型', '') || value('project_type'));
         const triggerUser = triggerUserOf(request);
         if (!name)
             throw Object.assign(new Error('立项单缺少项目名称'), { code: 'MISSING_FIELD' });
@@ -30033,11 +30034,85 @@ async function retryRecord(req) { const id = String(body(req).issue_uuid || '');
     await records.set(id, pending);
 }
 catch { } return ok(pending); }
+// ---- 动态下拉数据源（消除硬编码字段/状态 UUID，配置页实时拉取）----
+const openApiList = async (teamUUID, path, extraParams = {}) => {
+    const r = await FetchAsAdmin(`/openapi/v2/project/${path}`, { method: 'GET', params: { teamID: teamUUID, ...extraParams } });
+    return responseData(r);
+};
+async function listStatuses(req) {
+    const teamUUID = team(req);
+    if (!teamUUID)
+        return fail('MISSING_TEAM', '无法识别当前团队');
+    try {
+        const value = await openApiList(teamUUID, 'issueStatuses');
+        const list = value?.list ?? value?.data?.list ?? (Array.isArray(value) ? value : []);
+        const arr = Array.isArray(list) ? list : [];
+        const items = arr.map((s) => ({ uuid: String(s.id ?? s.uuid ?? ''), name: String(s.name ?? s.title ?? '') })).filter((x) => x.uuid);
+        Logger.info(`[立项审批] listStatuses teamID=${teamUUID} 共 ${items.length} 个状态`);
+        return ok({ items });
+    }
+    catch (e) {
+        Logger.error(`[立项审批] listStatuses 失败 teamID=${teamUUID} ${e?.message || ''}`);
+        return fail('LIST_STATUS_FAILED', `状态列表加载失败：${e?.message || ''}`);
+    }
+}
+async function listIssueFields(req) {
+    const teamUUID = team(req);
+    if (!teamUUID)
+        return fail('MISSING_TEAM', '无法识别当前团队');
+    try {
+        const all = [];
+        let cursor;
+        let guard = 0;
+        do {
+            const params = { teamID: teamUUID, limit: '500' };
+            if (cursor)
+                params.cursor = cursor;
+            const value = await openApiList(teamUUID, 'searchIssueFields', params);
+            const list = value?.list ?? value?.data?.list ?? (Array.isArray(value) ? value : []);
+            const arr = Array.isArray(list) ? list : [];
+            for (const f of arr)
+                all.push({ uuid: String(f.id ?? f.uuid ?? ''), name: String(f.name ?? ''), typeLabel: String(f.fieldTypeName ?? f.typeLabel ?? f.fieldType ?? '') });
+            const pageInfo = value?.pageInfo ?? value?.data?.pageInfo;
+            cursor = pageInfo?.hasNextPage ? pageInfo?.endCursor : undefined;
+            guard += 1;
+            if (!pageInfo?.hasNextPage)
+                break;
+        } while (cursor && guard < 20);
+        const items = all.filter((x) => x.uuid && x.name);
+        Logger.info(`[立项审批] listIssueFields teamID=${teamUUID} 共 ${items.length} 个字段`);
+        return ok({ items });
+    }
+    catch (e) {
+        Logger.error(`[立项审批] listIssueFields 失败 teamID=${teamUUID} ${e?.message || ''}`);
+        return fail('LIST_FIELD_FAILED', `字段列表加载失败：${e?.message || ''}`);
+    }
+}
+async function listProjectFields(req) {
+    const teamUUID = team(req);
+    if (!teamUUID)
+        return fail('MISSING_TEAM', '无法识别当前团队');
+    try {
+        const value = await openApiList(teamUUID, 'projectFields');
+        const fields = value?.fields ?? value?.data?.fields ?? (Array.isArray(value) ? value : []);
+        const arr = Array.isArray(fields) ? fields : [];
+        const items = arr.map((f) => ({ uuid: String(f.id ?? f.uuid ?? ''), name: String(f.name ?? ''), typeLabel: String(f.typeLabel ?? f.fieldTypeName ?? '') })).filter((x) => x.uuid && x.name);
+        Logger.info(`[立项审批] listProjectFields teamID=${teamUUID} 共 ${items.length} 个项目字段`);
+        return ok({ items });
+    }
+    catch (e) {
+        Logger.error(`[立项审批] listProjectFields 失败 teamID=${teamUUID} ${e?.message || ''}`);
+        return fail('LIST_PROJECT_FIELD_FAILED', `项目字段列表加载失败：${e?.message || ''}`);
+    }
+}
 
 exports.confirmRecord = confirmRecord;
 exports.enrichRecord = enrichRecord;
 exports.getConfig = getConfig;
+exports.listIssueFields = listIssueFields;
+exports.listProjectFields = listProjectFields;
 exports.listRecords = listRecords;
+exports.listStatuses = listStatuses;
 exports.onIssueStatusChanged = onIssueStatusChanged;
 exports.retryRecord = retryRecord;
 exports.saveConfig = saveConfig;

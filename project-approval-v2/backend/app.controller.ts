@@ -1,6 +1,6 @@
 import { Controller, Get, Post, HttpCode, Body, Query, Headers } from '@nestjs/common'
 import { AppService, type InstallCallbackPayload } from './app.service'
-import { ApprovalService, type IssueStatusChangedEvent } from './services/approval.service'
+import { ApprovalService, type ApprovalStatusChangedEvent } from './services/approval.service'
 import { OpenApiService } from './services/openapi.service'
 import { createWebPageURL } from './utils'
 
@@ -41,15 +41,17 @@ export class AppController {
     @Body() body: unknown,
     @Headers('x-ones-event-type') headerEventType?: string,
   ) {
-    const event = body as Partial<IssueStatusChangedEvent> | null | undefined
+    const event = body as Partial<ApprovalStatusChangedEvent> | null | undefined
     const eventType = event?.eventType ?? headerEventType
+    console.log(`[webhook] 收到事件 eventType=${eventType} headerEventType=${headerEventType} body=${JSON.stringify(body).slice(0, 800)}`)
     if (eventType === 'ones:events:health') {
       return { ok: true, message: 'health check passed' }
     }
     if (eventType !== 'ones:project:issue-status:changed') {
       return { ok: false, error: `unhandled event type: ${eventType}` }
     }
-    const result = await this.approvalService.handleStatusChanged(event as IssueStatusChangedEvent)
+    const result = await this.approvalService.handleStatusChanged(event as ApprovalStatusChangedEvent)
+    console.log(`[webhook] 事件处理结果 ${JSON.stringify(result)}`)
     return { ok: true, ...result }
   }
 
@@ -79,11 +81,41 @@ export class AppController {
     if (!teamUUID) return { ok: false, error: 'missing team_uuid' }
     const install = await this.approvalService.getInstallationInfo()
     if (!install) return { ok: false, error: 'no installation info' }
-    const resp = await this.openApiService.callV2(install, '/project/issueStatuses', {
-      method: 'GET',
-      query: { teamID: teamUUID },
-    })
-    return { ok: true, list: resp?.data?.list ?? resp?.list ?? [] }
+    try {
+      const resp = await this.openApiService.callV2(install, '/project/issueStatuses', {
+        method: 'GET',
+        query: { teamID: teamUUID },
+      })
+      return { ok: true, list: resp?.data?.list ?? resp?.list ?? [] }
+    } catch (e: any) {
+      console.error('[approval] statuses 接口调用失败', e?.message ?? e)
+      return { ok: false, error: String(e?.message ?? e) }
+    }
+  }
+
+  @Get('/api/options/teams')
+  @HttpCode(200)
+  async listTeams() {
+    const list = await this.approvalService.listTeams()
+    return { ok: true, list }
+  }
+
+  @Get('/api/options/projects')
+  @HttpCode(200)
+  async listProjects(@Query('team_uuid') teamUUID?: string) {
+    console.log(`[approval] GET /api/options/projects 收到 team_uuid=${teamUUID}`)
+    if (!teamUUID) return { ok: false, error: 'missing team_uuid' }
+    const list = await this.approvalService.listProjects(teamUUID)
+    return { ok: true, list }
+  }
+
+  @Get('/api/options/issue-types')
+  @HttpCode(200)
+  async listIssueTypes(@Query('team_uuid') teamUUID?: string) {
+    console.log(`[approval] GET /api/options/issue-types 收到 team_uuid=${teamUUID}`)
+    if (!teamUUID) return { ok: false, error: 'missing team_uuid' }
+    const list = await this.approvalService.listIssueTypes(teamUUID)
+    return { ok: true, list }
   }
 
   @Get('/api/options/issue-fields')
@@ -92,11 +124,30 @@ export class AppController {
     if (!teamUUID) return { ok: false, error: 'missing team_uuid' }
     const install = await this.approvalService.getInstallationInfo()
     if (!install) return { ok: false, error: 'no installation info' }
-    const resp = await this.openApiService.callV2(install, '/project/issueFields', {
-      method: 'GET',
-      query: { teamID: teamUUID },
-    })
-    return { ok: true, list: resp?.data?.list ?? resp?.list ?? [] }
+    try {
+      // searchIssueFields：完整可搜索属性目录（旧 issueFields 接口不完整，字段多时返回空）
+      const all: Array<{ id: string; name: string; fieldType?: string; fieldTypeName?: string }> = []
+      let cursor: string | undefined
+      let guard = 0
+      do {
+        const resp = await this.openApiService.callV2(install, '/project/searchIssueFields', {
+          method: 'GET',
+          query: { teamID: teamUUID, limit: '500', cursor },
+        })
+        const list = resp?.data?.list ?? resp?.list ?? []
+        const arr = Array.isArray(list) ? list : []
+        for (const f of arr) all.push({ id: String(f.id ?? ''), name: String(f.name ?? ''), fieldType: String(f.fieldType ?? ''), fieldTypeName: String(f.fieldTypeName ?? '') })
+        const pageInfo = resp?.data?.pageInfo ?? resp?.pageInfo
+        cursor = pageInfo?.hasNextPage ? pageInfo?.endCursor : undefined
+        guard += 1
+        if (!pageInfo?.hasNextPage) break
+      } while (cursor && guard < 20)
+      console.log(`[approval] listIssueFields teamID=${teamUUID} 共 ${all.length} 个字段`)
+      return { ok: true, list: all }
+    } catch (e: any) {
+      console.error('[approval] issueFields 接口调用失败', e?.message ?? e)
+      return { ok: false, error: String(e?.message ?? e) }
+    }
   }
 
   @Get('/api/options/project-fields')
@@ -105,11 +156,16 @@ export class AppController {
     if (!teamUUID) return { ok: false, error: 'missing team_uuid' }
     const install = await this.approvalService.getInstallationInfo()
     if (!install) return { ok: false, error: 'no installation info' }
-    const resp = await this.openApiService.callV2(install, '/project/projectFields', {
-      method: 'GET',
-      query: { teamID: teamUUID },
-    })
-    return { ok: true, list: resp?.data?.fields ?? resp?.fields ?? [] }
+    try {
+      const resp = await this.openApiService.callV2(install, '/project/projectFields', {
+        method: 'GET',
+        query: { teamID: teamUUID },
+      })
+      return { ok: true, list: resp?.data?.fields ?? resp?.fields ?? [] }
+    } catch (e: any) {
+      console.error('[approval] projectFields 接口调用失败', e?.message ?? e)
+      return { ok: false, error: String(e?.message ?? e) }
+    }
   }
 
   // ---- 记录列表 ----

@@ -2,7 +2,7 @@
   "app": {
     "id": "app_c87f0cf45bfc4a8c",
     "name": "project-approval-v2",
-    "version": "v0.1.0",
+    "version": "v0.3.0",
     "desc": "立项审批通过后自动创建项目，并将审批单字段映射到新项目",
     "logo": "/public/logo.svg",
     "auth": {
@@ -15,6 +15,9 @@
       "url": "/events/webhook",
       "types": [
         {
+          "eventType": "ones:project:issue:created"
+        },
+        {
           "eventType": "ones:project:issue-status:changed"
         }
       ]
@@ -24,7 +27,10 @@
         "read:account:teams",
         "read:project:project",
         "write:project:project",
-        "read:project:issue"
+        "read:project:issue",
+        "read:project:issueType",
+        "read:project:issueStatus",
+        "read:project:issueField"
       ],
       "type": ["user", "app"]
     },
@@ -82,6 +88,16 @@
             "approved_status_name": {
               "type": "string",
               "length": 128,
+              "default": ""
+            },
+            "approval_project_uuid": {
+              "type": "string",
+              "length": 64,
+              "default": ""
+            },
+            "approval_issue_type_id": {
+              "type": "string",
+              "length": 64,
               "default": ""
             },
             "project_template_id": {
@@ -169,7 +185,8 @@
               "default": ""
             },
             "error_message": {
-              "type": "text"
+              "type": "text",
+              "default": ""
             },
             "created_at": {
               "type": "integer",

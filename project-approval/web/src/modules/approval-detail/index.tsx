@@ -11,7 +11,6 @@ const json = async (response: Response, label: string) => {
   let value: any = {}
   try { value = text ? JSON.parse(text) : {} } catch { throw Error(`${label}返回了无法识别的结果（${response.status}）`) }
   if (!response.ok) throw Error(value?.desc || value?.message || value?.errcode || `${label}失败（${response.status}）`)
-  // Team API responses are wrapped as { data: { ok, data, error } }.
   return value?.body || (value?.data && typeof value.data === 'object' && ('ok' in value.data || 'error' in value.data) ? value.data : value)
 }
 
@@ -43,10 +42,68 @@ const native = async (path: string, data: any) => json(await fetch(`/project/api
 const verifyProject = async (projectUUID: string) => { const id = team(); const paths = [`/project/api/project/team/${id}/project/${projectUUID}`, `/project/api/project/team/${id}/project/${projectUUID}/browse`]; for (const path of paths) for (const method of ['GET', 'POST']) try { const r = await fetch(path, { method, credentials: 'include', headers: method === 'POST' ? { 'Content-Type': 'application/json' } : undefined, body: method === 'POST' ? '{}' : undefined }); if (!r.ok) continue; const value: any = await r.json(); const data: any = value?.body || value?.data || value; if (data && typeof data === 'object' && (data.uuid || data.project_uuid || data.name || data.project)) return true } catch {} return false }
 const formName = (value: any, wanted?: string): string => { if (!value || typeof value !== 'object') return ''; if (wanted && Object.prototype.hasOwnProperty.call(value, wanted)) { const v: any = value[wanted]; const text = typeof v === 'object' ? (v.value || v.displayValue || v.text || v.name) : v; if (String(text || '').trim()) return String(text).trim() } for (const key of ['project_name', '项目名称', '立项名称', 'name', 'title']) if (typeof value[key] === 'string' && value[key].trim()) return value[key].trim(); for (const item of Object.values(value)) { const found = formName(item, wanted); if (found) return found } return '' }
 const dateValue = (value: any) => { if (!value) return ''; if (typeof value === 'number' || /^\d{10,}$/.test(String(value))) { const d = new Date(Number(value)); if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10) } return String(value).slice(0, 10) }
-const enrich = async (record: any) => { const id = team(); try { const response = await fetch(`/project/api/ones-project/team/${id}/workitems/onesql`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: `select uid(field001,Bukbqjpm,field027,field028,QE8d8KfA,field003,field004,cA3wKBQs,v$issue_path) from issue where uid(uuid) = uid('${record.issue_uuid}');` }) }); if (response.ok) { const json: any = await response.json(); const item = json?.data?.[0]?.item || json?.body?.data?.[0]?.item; const name = item?.Bukbqjpm || formName(item); const type = item?.cA3wKBQs; const typeName = typeof type === 'object' ? (type.name || type.value || type.text || '') : String(type || ''); const ownerValue: any = item?.QE8d8KfA || item?.field003 || item?.field004; const owner = typeof ownerValue === 'object' ? ownerValue.uuid : (typeof ownerValue === 'string' ? ownerValue : ''); if (name) { await api('/records/enrich', { issue_uuid: record.issue_uuid, project_name: String(name) }); return { ...record, project_name: String(name), source_start: item?.field027 || '', source_end: item?.field028 || '', source_type: typeof type === 'object' ? (type.uuid || '') : '', source_type_name: typeName, source_owner: owner || 'RXbUNSu8' } } } } catch {} return record }
+
+// ---- 从配置读字段映射（消除硬编码字段 UUID）----
+let cachedConfig: any = null
+const loadConfig = async () => {
+  if (cachedConfig?.maps) return cachedConfig
+  try {
+    const c = await api('/config/get')
+    let maps: any = {}
+    try { maps = JSON.parse(c?.mapping_json || '{}') } catch {}
+    cachedConfig = { ...c, maps }
+  } catch { cachedConfig = { maps: {} } }
+  return cachedConfig
+}
+
+const enrich = async (record: any) => {
+  const id = team()
+  const { maps } = await loadConfig()
+  const nameField = String(maps['项目名称'] || '')
+  const startField = String(maps['计划开始日期'] || '')
+  const endField = String(maps['计划完成日期'] || '')
+  const ownerField = String(maps['项目负责人'] || '')
+  const typeField = String(maps['项目类型（单选）'] || maps['项目类型'] || '')
+  const fieldList = Array.from(new Set([nameField, startField, endField, ownerField, typeField].filter(x => /^[A-Za-z0-9_-]{6,64}$/.test(x))))
+  try {
+    if (!fieldList.length) return record
+    const query = `select uid(field001,${fieldList.join(',')},v$issue_path) from issue where uid(uuid) = uid('${record.issue_uuid}');`
+    const response = await fetch(`/project/api/ones-project/team/${id}/workitems/onesql`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) })
+    if (response.ok) {
+      const json: any = await response.json()
+      const item = json?.data?.[0]?.item || json?.body?.data?.[0]?.item
+      const name = (nameField && item?.[nameField]) || formName(item)
+      const type = typeField ? item?.[typeField] : undefined
+      const typeName = typeof type === 'object' ? (type.name || type.value || type.text || '') : String(type || '')
+      const ownerValue: any = ownerField ? item?.[ownerField] : undefined
+      const owner = typeof ownerValue === 'object' ? ownerValue.uuid : (typeof ownerValue === 'string' ? ownerValue : '')
+      if (name) {
+        await api('/records/enrich', { issue_uuid: record.issue_uuid, project_name: String(name) })
+        return { ...record, project_name: String(name), source_start: startField ? item?.[startField] : '', source_end: endField ? item?.[endField] : '', source_type: typeof type === 'object' ? (type.uuid || '') : '', source_type_name: typeName, source_owner: owner || '' }
+      }
+    }
+  } catch {}
+  return record
+}
 const findOptions = (value: any): any[] => { if (!value || typeof value !== 'object') return []; if (Array.isArray(value.options)) return value.options; for (const child of Object.values(value)) { const found = findOptions(child); if (found.length) return found } return [] }
 const resolveTypeOption = async (projectUUID: string, record: any) => { if (!record.source_type_name && !record.source_type) return ''; const id = team(); const paths = [`/item/project-${projectUUID}/fields`, `/item/project-${projectUUID}`, `/projects/${projectUUID}/fields`]; for (const path of paths) for (const method of ['GET', 'POST']) try { const r = await fetch(`/project/api/project/team/${id}${path}`, { method, credentials: 'include', headers: method === 'POST' ? { 'Content-Type': 'application/json' } : undefined, body: method === 'POST' ? '{}' : undefined }); if (!r.ok) continue; const value = await r.json(); const options = findOptions(value?.body || value?.data || value); const wanted = String(record.source_type_name || '').trim(); const match = options.find((o: any) => String(o?.value || o?.name || o?.label || '').trim() === wanted); if (match?.uuid) return String(match.uuid) } catch {} return String(record.source_type || '') }
-const updateProject = async (projectUUID: string, record: any) => { const item: any = {}; if (record.source_start) item.plan_start_time = dateValue(record.source_start); if (record.source_end) item.plan_end_time = dateValue(record.source_end); if (record.source_owner) item.assign = record.source_owner; const typeOption = await resolveTypeOption(projectUUID, record) || ({ '研发类': 'PGk2ztpj' } as any)[String(record.source_type_name || '').trim()] || ''; if (typeOption) item.EdUDpRTR = typeOption; if (!Object.keys(item).length) return; const r = await fetch(`/project/api/project/team/${team()}/item/project-${projectUUID}/update`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item }) }); const raw = await r.text(); let value: any = {}; try { value = raw ? JSON.parse(raw) : {} } catch {} if (!r.ok || value?.error || value?.data?.error) throw Error(`项目属性更新失败（${r.status}）`) }
+const updateProject = async (projectUUID: string, record: any) => {
+  const item: any = {}
+  if (record.source_start) item.plan_start_time = dateValue(record.source_start)
+  if (record.source_end) item.plan_end_time = dateValue(record.source_end)
+  if (record.source_owner) item.assign = record.source_owner
+  const { maps } = await loadConfig()
+  const typeProjectField = String(maps['项目类型目标字段'] || '')
+  const typeOption = await resolveTypeOption(projectUUID, record)
+  // 动态写入项目类型字段（消除硬编码 EdUDpRTR 字段 UUID 和 PGk2ztpj 选项 UUID）
+  if (typeProjectField && typeOption) item[typeProjectField] = typeOption
+  if (!Object.keys(item).length) return
+  const r = await fetch(`/project/api/project/team/${team()}/item/project-${projectUUID}/update`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item }) })
+  const raw = await r.text()
+  let value: any = {}
+  try { value = raw ? JSON.parse(raw) : {} } catch {}
+  if (!r.ok || value?.error || value?.data?.error) throw Error(`项目属性更新失败（${r.status}）`)
+}
 const uuid = () => Array.from({ length: 16 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 36)]).join('')
 
 function App() {
