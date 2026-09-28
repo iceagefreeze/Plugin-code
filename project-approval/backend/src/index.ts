@@ -37,79 +37,41 @@ function responseSummary(response: any): string {
   try { return JSON.stringify(value).slice(0, 1000) } catch { return `keys=${Object.keys(value).join(',')}` }
 }
 async function issueDetail(teamUUID: string, issueUUID: string, req?: any): Promise<any> {
-  const c = await config(teamUUID)
-  let mapping: any = {}
-  try { mapping = JSON.parse(String(c.mapping_json || '{}')) } catch {}
-  const fieldUUIDs = Object.values(mapping).map((x: any) => String(x || '')).filter((x: string) => /^[A-Za-z0-9_-]{6,64}$/.test(x))
-  const fields = Array.from(new Set(fieldUUIDs))
-  const normalizeDetailForm = (raw: any): any => {
-    const value = responseData(raw)
-    const form = value?.detail_form || value?.detailForm || value?.data?.detail_form || value?.data?.detailForm || value
-    const properties = form?.properties || form?.fields || form?.field_values || form?.values || form?.form_items || value?.fields || {}
-    const list = Array.isArray(properties) ? properties.reduce((out: any, item: any) => {
-      const key = item?.field_uuid || item?.fieldUuid || item?.property_uuid || item?.uuid || item?.id || item?.key || item?.name
-      const field = item?.field || item?.property || item
-      if (key) out[key] = field?.value ?? field?.displayValue ?? field?.display_value ?? field?.text ?? field
-      if (item?.name && item?.name !== key) out[item.name] = field?.value ?? field?.displayValue ?? field?.display_value ?? field?.text ?? field
-      return out
-    }, {}) : Object.entries(properties || {}).reduce((out: any, [key, item]: any) => {
-      out[key] = item
-      return out
-    }, {})
-    const name = form?.name || form?.title || value?.name || value?.title || list.field001?.value || list.field001
-    return { name, properties: list }
-  }
-  const detailFormUrls = [
-    `/project/api/project/team/${teamUUID}/items/${issueUUID}/detail_form`,
-    `/project/api/project/team/${teamUUID}/issues/${issueUUID}/detail_form`,
-    `/project/api/ones-project/team/${teamUUID}/workitems/${issueUUID}/detail_form`,
-    `/project/api/project/team/${teamUUID}/tasks/${issueUUID}/detail_form`,
-  ]
-  for (const url of detailFormUrls) {
-    try {
-      const r: any = await OPFetch(url, { method: 'GET', teamUUID })
-      const normalized = normalizeDetailForm(r)
-      if (normalized.properties && (Object.keys(normalized.properties).length || normalized.name)) return normalized
-    } catch (e: any) {
-      Logger.info(`[立项审批] detail_form接口失败 url=${url} status=${e?.response?.status || ''} message=${e?.message || ''}`)
+  // 用 OpenAPI GET /project/issues/:issueID 读工作项详情，字段值在 fieldValues 数组
+  try {
+    const r: any = await FetchAsAdmin(`/openapi/v2/project/issues/${issueUUID}`, { method: 'GET', params: { teamID: teamUUID } })
+    const value = responseData(r)
+    const issue = value?.data ?? value
+    const name = String(issue?.name || issue?.title || '')
+    const fieldValues = Array.isArray(issue?.fieldValues) ? issue.fieldValues : []
+    const properties: any = {}
+    for (const fv of fieldValues) {
+      const fid = String(fv?.fieldID || fv?.field_id || fv?.fieldId || '')
+      if (fid) properties[fid] = fv?.value
     }
+    if (name || Object.keys(properties).length) return { name, properties }
+  } catch (e: any) {
+    Logger.info(`[立项审批] OpenAPI工作项详情失败 issue=${issueUUID} status=${e?.response?.status || ''} message=${e?.message || ''}`)
   }
-  if (fields.length) {
-    try {
-      const query = `select uid(field001,${fields.join(',')},v$issue_path) from issue where uid(uuid) = uid('${issueUUID}');`
-      const r: any = await OPFetch(`/project/api/ones-project/team/${teamUUID}/workitems/onesql`, { method: 'POST', teamUUID, data: { query } })
-      const item = r?.data?.[0]?.item || r?.body?.data?.[0]?.item || r?.data?.data?.[0]?.item
-      if (item) return { name: item.field001, properties: item }
-    } catch (e: any) { Logger.info(`[立项审批] ONESQL工作项详情失败 status=${e?.response?.status || ''} message=${e?.message || ''}`) }
-  }
-  const urls = [
-    `/project/api/project/team/${teamUUID}/tasks/${issueUUID}`,
-    `/project/api/ones-project/team/${teamUUID}/tasks/${issueUUID}`,
-    `/project/api/project/team/${teamUUID}/issues/${issueUUID}`,
-  ]
-  let last: any
-  for (const url of urls) {
-    try {
-      const r: any = await OPFetch(url, { method: 'GET', teamUUID })
-      const value = r?.body || r?.data || r
-      if (value && typeof value === 'object') return value
-    } catch (e: any) {
-      last = e
-      Logger.info(`[立项审批] 工作项详情接口失败 url=${url} status=${e?.response?.status || ''} message=${e?.message || ''}`)
-    }
-  }
-  for (const url of [`/openapi/v2/project/issues/${issueUUID}`, `/openapi/v2/project/issue/${issueUUID}`]) {
-    try {
-      const r: any = await FetchAsAdmin(url, { method: 'GET', params: { teamID: teamUUID } })
-      const value = responseData(r)
-      if (value && typeof value === 'object') return value
-    } catch (e: any) { Logger.info(`[立项审批] 管理员OpenAPI工作项详情失败 url=${url} status=${e?.response?.status || ''} detail=${responseSummary(e?.response) || e?.message || ''}`) }
-  }
-  throw Object.assign(new Error(`读取审批工作项失败：${last?.message || '接口不可用'}`), { code: 'ISSUE_DETAIL_FAILED' })
+  throw Object.assign(new Error('读取审批工作项详情失败'), { code: 'ISSUE_DETAIL_FAILED' })
+}
+function fieldText(v: any): string {
+  if (v == null) return ''
+  if (typeof v === 'string' || typeof v === 'number') return String(v)
+  if (Array.isArray(v)) return v.map((x: any) => fieldText(x)).filter(Boolean).join(', ')
+  if (typeof v === 'object') return String(v.value ?? v.name ?? v.label ?? v.displayValue ?? v.display_value ?? v.text ?? v.title ?? '')
+  return String(v)
+}
+function fieldId(v: any): string {
+  if (v == null) return ''
+  if (typeof v === 'string' || typeof v === 'number') return String(v)
+  if (Array.isArray(v)) return fieldId(v[0])
+  if (typeof v === 'object') return String(v.id ?? v.uuid ?? '')
+  return ''
 }
 function singleSelect(value: any): { uuid: string; name: string } {
   const v = Array.isArray(value) ? value[0] : value
-  if (v && typeof v === 'object') return { uuid: String(v.uuid || v.id || v.value || ''), name: String(v.name || v.label || v.displayValue || '') }
+  if (v && typeof v === 'object') return { uuid: String(v.uuid || v.id || ''), name: String(v.name || v.label || v.displayValue || v.value || v.text || '') }
   return { uuid: '', name: String(v || '') }
 }
 function isApproved(c: any, s: any) { if (!s || typeof s === 'string' && !s.trim()) return false; const id = typeof s === 'object' ? String(s.id || s.uuid || s.statusID || s.statusUUID || '') : String(s); const name = typeof s === 'object' ? String(s.name || s.title || s.statusName || '') : String(s); const configured = String(c.approved_status_uuid || '').trim(); const configuredName = String(c.approved_status_name || '').trim(); return Boolean((configured && id === configured) || (configuredName && name.trim() === configuredName) || (configuredName && typeof s === 'string' && s.trim() === configuredName)) }
@@ -120,14 +82,18 @@ async function run(teamUUID: string, issueUUID: string, eventID: string, retry =
   if (existing?.status === 'created' || existing?.status === 'pending' || existing?.status === 'creating') { runtimeRecords[issueUUID] = existing; return existing }
   const now = Date.now(); runtimeRecords[issueUUID] = { ...(existing || {}), issue_uuid: issueUUID, team_uuid: teamUUID, event_id: eventID || existing?.event_id || '', status: 'creating', retry_count: Number(existing?.retry_count || 0) + (retry ? 1 : 0), updated_at: now }; try { await records.set(issueUUID, runtimeRecords[issueUUID]) } catch {}
   try {
-    let issue: any = {}; try { issue = await issueDetail(teamUUID, issueUUID, request) } catch (e: any) { Logger.info(`[立项审批] 跳过工作项详情读取 issue=${issueUUID} message=${e?.message || ''}`) }; const eventData = eventOf(request).data || {}; const p = { ...(eventData.properties || {}), ...(eventData.field_values || {}), ...(issue?.properties || issue?.data?.properties || {}) }
+    let issue: any = {}; try { issue = await issueDetail(teamUUID, issueUUID, request) } catch (e: any) { Logger.info(`[立项审批] 跳过工作项详情读取 issue=${issueUUID} message=${e?.message || ''}`) }; const p: any = issue?.properties || {}
     let mapping: any = {}; try { mapping = JSON.parse(String(c.mapping_json || '{}')) } catch {}
     // 映射值存字段 UUID（配置页动态选择）；兼容旧配置里存的中文字段名（按名称取值）
-    const mapped = (target: string, fallback: string) => { const raw = String(mapping[target] || fallback || '').trim(); if (!raw) return undefined; const v = p[raw]; return v?.value ?? v?.displayValue ?? v?.display_value ?? v }
-    const value = (name: string) => { const v = p[name]; return v?.value ?? v?.displayValue ?? v?.display_value ?? v }
-    const name = String(mapped('项目名称', '') || issue?.name || issue?.title || `立项项目-${issueUUID.slice(-8)}`).trim(); const owner = String(mapped('项目负责人', '') || issue?.assignee || '').trim(); const projectType = singleSelect(mapped('项目类型（单选）', '') || mapped('项目类型', '') || value('project_type')); const triggerUser = triggerUserOf(request)
+    const mapped = (target: string, fallback: string): any => { const raw = String(mapping[target] || fallback || '').trim(); if (!raw) return undefined; return p[raw] }
+    const name = fieldText(mapped('项目名称', '')) || String(issue?.name || issue?.title || `立项项目-${issueUUID.slice(-8)}`).trim()
+    const owner = fieldId(mapped('项目负责人', '')) || fieldId(issue?.assignee)
+    const startDate = fieldText(mapped('开始日期', '')).slice(0, 10)
+    const endDate = fieldText(mapped('结束日期', '')).slice(0, 10)
+    const projectType = singleSelect(mapped('项目类型（单选）', '') || mapped('项目类型', ''))
+    const triggerUser = triggerUserOf(request)
     if (!name) throw Object.assign(new Error('立项单缺少项目名称'), { code: 'MISSING_FIELD' })
-    const pending = { issue_uuid: issueUUID, team_uuid: teamUUID, event_id: eventID || existing?.event_id || '', status: 'pending', project_uuid: '', project_name: name, project_type_uuid: projectType.uuid, project_type_name: projectType.name, trigger_user_uuid: triggerUser, error_code: '', error_message: '', retry_count: Number(existing?.retry_count || 0) + (retry ? 1 : 0), updated_at: Date.now() }
+    const pending = { issue_uuid: issueUUID, team_uuid: teamUUID, event_id: eventID || existing?.event_id || '', status: 'pending', project_uuid: '', project_name: name, owner_uuid: owner, start_date: startDate, end_date: endDate, project_type_uuid: projectType.uuid, project_type_name: projectType.name, trigger_user_uuid: triggerUser, error_code: '', error_message: '', retry_count: Number(existing?.retry_count || 0) + (retry ? 1 : 0), updated_at: Date.now() }
     runtimeRecords[issueUUID] = pending; try { await records.set(issueUUID, pending) } catch {}; Logger.info(`[立项审批] 已生成待创建记录 issue=${issueUUID}`); return pending
   } catch (e: any) { const failed = { ...(runtimeRecords[issueUUID] || {}), issue_uuid: issueUUID, team_uuid: teamUUID, status: 'failed', error_code: e?.code || 'CREATE_FAILED', error_message: e?.message || '创建项目失败', updated_at: Date.now() }; runtimeRecords[issueUUID] = failed; try { await records.set(issueUUID, failed) } catch {}; throw e }
 }
@@ -212,5 +178,46 @@ export async function listProjectFields(req: PluginRequest): Promise<PluginRespo
   } catch (e: any) {
     Logger.error(`[立项审批] listProjectFields 失败 teamID=${teamUUID} ${e?.message || ''}`)
     return fail('LIST_PROJECT_FIELD_FAILED', `项目字段列表加载失败：${e?.message || ''}`)
+  }
+}
+export async function createProject(req: PluginRequest): Promise<PluginResponse> {
+  const teamUUID = team(req)
+  if (!teamUUID) return fail('MISSING_TEAM', '无法识别当前团队')
+  const b = body(req)
+  const name = String(b.name || '').trim()
+  const templateID = String(b.template_uuid || 'comwater').trim()
+  const members = Array.isArray(b.members) ? b.members.map((x: any) => String(x)).filter(Boolean) : []
+  if (!name) return fail('INVALID_REQUEST', '缺少项目名称')
+  try {
+    const r: any = await FetchAsAdmin(`/openapi/v2/project/projects`, { method: 'POST', params: { teamID: teamUUID }, data: { name, templateID, members } })
+    const value = responseData(r)
+    const projectUUID = String(value?.id || value?.data?.id || '')
+    if (!projectUUID) return fail('CREATE_FAILED', `创建项目未返回项目 ID：${responseSummary(value).slice(0, 200)}`)
+    Logger.info(`[立项审批] 项目创建成功 project=${projectUUID} name=${name} template=${templateID}`)
+    return ok({ project_uuid: projectUUID })
+  } catch (e: any) {
+    Logger.error(`[立项审批] 项目创建失败 ${e?.message || ''} detail=${responseSummary(e?.response).slice(0, 500)}`)
+    return fail('CREATE_FAILED', `项目创建失败：${e?.message || ''}`)
+  }
+}
+export async function updateProjectFields(req: PluginRequest): Promise<PluginResponse> {
+  const teamUUID = team(req)
+  const b = body(req)
+  const projectUUID = String(b.project_uuid || '')
+  if (!teamUUID || !projectUUID) return fail('INVALID_REQUEST', '缺少团队或项目 UUID')
+  const data: any = {}
+  if (b.name) data.name = String(b.name)
+  if (b.owner) data.owner = String(b.owner)
+  if (b.planned_start_date) data.plannedStartDate = String(b.planned_start_date).slice(0, 10)
+  if (b.planned_end_date) data.plannedEndDate = String(b.planned_end_date).slice(0, 10)
+  if (b.custom_field && typeof b.custom_field === 'object' && Object.keys(b.custom_field).length) data.customField = b.custom_field
+  if (!Object.keys(data).length) return ok({ updated: false })
+  try {
+    const r: any = await FetchAsAdmin(`/openapi/v2/project/projects/${projectUUID}`, { method: 'PUT', params: { teamID: teamUUID }, data })
+    Logger.info(`[立项审批] 项目字段更新成功 project=${projectUUID} keys=${Object.keys(data).join(',')}`)
+    return ok({ updated: true })
+  } catch (e: any) {
+    Logger.error(`[立项审批] 项目字段更新失败 project=${projectUUID} ${e?.message || ''} detail=${responseSummary(e?.response).slice(0, 500)}`)
+    return fail('UPDATE_FAILED', `项目字段更新失败：${e?.message || ''}`)
   }
 }

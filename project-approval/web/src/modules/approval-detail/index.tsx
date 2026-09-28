@@ -38,9 +38,6 @@ const api = async (path: string, data: any = {}) => {
   throw Error(last?.message || '立项审批接口不可用')
 }
 
-const native = async (path: string, data: any) => json(await fetch(`/project/api/ones-project/team/${team()}${path}`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }), '项目创建接口')
-const verifyProject = async (projectUUID: string) => { const id = team(); const paths = [`/project/api/project/team/${id}/project/${projectUUID}`, `/project/api/project/team/${id}/project/${projectUUID}/browse`]; for (const path of paths) for (const method of ['GET', 'POST']) try { const r = await fetch(path, { method, credentials: 'include', headers: method === 'POST' ? { 'Content-Type': 'application/json' } : undefined, body: method === 'POST' ? '{}' : undefined }); if (!r.ok) continue; const value: any = await r.json(); const data: any = value?.body || value?.data || value; if (data && typeof data === 'object' && (data.uuid || data.project_uuid || data.name || data.project)) return true } catch {} return false }
-const formName = (value: any, wanted?: string): string => { if (!value || typeof value !== 'object') return ''; if (wanted && Object.prototype.hasOwnProperty.call(value, wanted)) { const v: any = value[wanted]; const text = typeof v === 'object' ? (v.value || v.displayValue || v.text || v.name) : v; if (String(text || '').trim()) return String(text).trim() } for (const key of ['project_name', '项目名称', '立项名称', 'name', 'title']) if (typeof value[key] === 'string' && value[key].trim()) return value[key].trim(); for (const item of Object.values(value)) { const found = formName(item, wanted); if (found) return found } return '' }
 const dateValue = (value: any) => { if (!value) return ''; if (typeof value === 'number' || /^\d{10,}$/.test(String(value))) { const d = new Date(Number(value)); if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10) } return String(value).slice(0, 10) }
 
 // ---- 从配置读字段映射（消除硬编码字段 UUID）----
@@ -56,55 +53,21 @@ const loadConfig = async () => {
   return cachedConfig
 }
 
-const enrich = async (record: any) => {
-  const id = team()
-  const { maps } = await loadConfig()
-  const nameField = String(maps['项目名称'] || '')
-  const startField = String(maps['开始日期'] || '')
-  const endField = String(maps['结束日期'] || '')
-  const ownerField = String(maps['项目负责人'] || '')
-  const typeField = String(maps['项目类型（单选）'] || maps['项目类型'] || '')
-  const fieldList = Array.from(new Set([nameField, startField, endField, ownerField, typeField].filter(x => /^[A-Za-z0-9_-]{6,64}$/.test(x))))
-  try {
-    if (!fieldList.length) return record
-    const query = `select uid(field001,${fieldList.join(',')},v$issue_path) from issue where uid(uuid) = uid('${record.issue_uuid}');`
-    const response = await fetch(`/project/api/ones-project/team/${id}/workitems/onesql`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) })
-    if (response.ok) {
-      const json: any = await response.json()
-      const item = json?.data?.[0]?.item || json?.body?.data?.[0]?.item
-      const name = (nameField && item?.[nameField]) || formName(item)
-      const type = typeField ? item?.[typeField] : undefined
-      const typeName = typeof type === 'object' ? (type.name || type.value || type.text || '') : String(type || '')
-      const ownerValue: any = ownerField ? item?.[ownerField] : undefined
-      const owner = typeof ownerValue === 'object' ? ownerValue.uuid : (typeof ownerValue === 'string' ? ownerValue : '')
-      if (name) {
-        await api('/records/enrich', { issue_uuid: record.issue_uuid, project_name: String(name) })
-        return { ...record, project_name: String(name), source_start: startField ? item?.[startField] : '', source_end: endField ? item?.[endField] : '', source_type: typeof type === 'object' ? (type.uuid || '') : '', source_type_name: typeName, source_owner: owner || '' }
-      }
-    }
-  } catch {}
-  return record
-}
-const findOptions = (value: any): any[] => { if (!value || typeof value !== 'object') return []; if (Array.isArray(value.options)) return value.options; for (const child of Object.values(value)) { const found = findOptions(child); if (found.length) return found } return [] }
-const resolveTypeOption = async (projectUUID: string, record: any) => { if (!record.source_type_name && !record.source_type) return ''; const { maps } = await loadConfig(); const typeProjectField = String(maps['项目类型目标字段'] || ''); const wanted = String(record.source_type_name || '').trim(); try { const data = await api('/project-fields/list'); const fields = Array.isArray(data?.items) ? data.items : []; const field = fields.find((f: any) => f.uuid === typeProjectField); const options = Array.isArray(field?.options) ? field.options : []; const match = options.find((o: any) => String(o?.value ?? o?.name ?? o?.id ?? o?.uuid ?? '').trim() === wanted); if (match) return String(match.uuid || match.id || '') } catch {} return String(record.source_type || '') }
+const resolveTypeOption = async (record: any) => { const typeUuid = String(record.project_type_uuid || record.source_type || ''); const typeName = String(record.project_type_name || record.source_type_name || ''); if (!typeName && !typeUuid) return ''; const { maps } = await loadConfig(); const typeProjectField = String(maps['项目类型目标字段'] || ''); const wanted = typeName.trim(); try { const data = await api('/project-fields/list'); const fields = Array.isArray(data?.items) ? data.items : []; const field = fields.find((f: any) => f.uuid === typeProjectField); const options = Array.isArray(field?.options) ? field.options : []; const match = options.find((o: any) => String(o?.value ?? o?.name ?? o?.id ?? o?.uuid ?? o?.label ?? '').trim() === wanted); if (match) return String(match.uuid || match.id || '') } catch {} return typeUuid }
 const updateProject = async (projectUUID: string, record: any) => {
-  const item: any = {}
-  if (record.source_start) item.plan_start_time = dateValue(record.source_start)
-  if (record.source_end) item.plan_end_time = dateValue(record.source_end)
-  if (record.source_owner) item.assign = record.source_owner
   const { maps } = await loadConfig()
   const typeProjectField = String(maps['项目类型目标字段'] || '')
-  const typeOption = await resolveTypeOption(projectUUID, record)
-  // 动态写入项目类型字段（消除硬编码 EdUDpRTR 字段 UUID 和 PGk2ztpj 选项 UUID）
-  if (typeProjectField && typeOption) item[typeProjectField] = typeOption
-  if (!Object.keys(item).length) return
-  const r = await fetch(`/project/api/project/team/${team()}/item/project-${projectUUID}/update`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item }) })
-  const raw = await r.text()
-  let value: any = {}
-  try { value = raw ? JSON.parse(raw) : {} } catch {}
-  if (!r.ok || value?.error || value?.data?.error) throw Error(`项目属性更新失败（${r.status}）`)
+  const typeOption = await resolveTypeOption(record)
+  const customField: any = {}
+  if (typeProjectField && typeOption) customField[typeProjectField] = typeOption
+  const data: any = { project_uuid: projectUUID }
+  if (record.owner_uuid) data.owner = record.owner_uuid
+  if (record.start_date) data.planned_start_date = dateValue(record.start_date)
+  if (record.end_date) data.planned_end_date = dateValue(record.end_date)
+  if (Object.keys(customField).length) data.custom_field = customField
+  if (!data.owner && !data.planned_start_date && !data.planned_end_date && !Object.keys(customField).length) return
+  await api('/project/update', data)
 }
-const uuid = () => Array.from({ length: 16 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 36)]).join('')
 
 function App() {
   const [items, setItems] = useState<any[]>([])
@@ -117,23 +80,21 @@ function App() {
     const lockKey = `ones-project-approval:create:${record.issue_uuid}`
     if (sessionStorage.getItem(lockKey) === '1') return
     const knownProject = localStorage.getItem(lockKey)
-    if (knownProject && await verifyProject(knownProject)) { await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: knownProject }); await load(); return } localStorage.removeItem(lockKey)
+    if (knownProject) { await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: knownProject }); await load(); return }
     sessionStorage.setItem(lockKey, '1')
     setBusy(record.issue_uuid); setMessage(automatic ? '检测到待创建记录，正在创建项目…' : '正在创建项目…')
     try {
-      const enriched = await enrich(record); const cfg2 = await loadConfig(); const name = String(enriched.project_name || `立项项目-${String(record.issue_uuid).slice(-8)}`)
-      const generated = await native('/identifier', { name })
-      const identifier = String(generated.identifier || '')
-      if (!identifier) throw Error('未取得项目标识')
-      const checked = await native('/identifier/check', { identifier })
-      if (checked.is_duplicate) throw Error(`项目标识重复：${identifier}`)
-      const result = await native('/projects/add2', { uuid: uuid(), name, icon: 'i-ProjectFilled', identifier, keep_sample_data: true, members: record.trigger_user_uuid ? [record.trigger_user_uuid] : [], template_id: cfg2.template_uuid || 'comwater' })
-      const projectUUID = String(result.project_uuid || '')
+      const record2 = { ...record, project_name: record.project_name, owner_uuid: record.owner_uuid, start_date: record.start_date, end_date: record.end_date, project_type_uuid: record.project_type_uuid, project_type_name: record.project_type_name }
+      const cfg2 = await loadConfig()
+      const name = String(record2.project_name || record2.name || `立项项目-${String(record.issue_uuid).slice(-8)}`).trim()
+      const members = record.trigger_user_uuid ? [record.trigger_user_uuid] : []
+      const created = await api('/project/create', { name, template_uuid: cfg2.template_uuid || 'comwater', members })
+      const projectUUID = String(created.project_uuid || '')
       if (!projectUUID) throw Error('创建接口未返回项目 UUID')
       localStorage.setItem(lockKey, projectUUID)
-      await updateProject(projectUUID, enriched)
-      await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: projectUUID, project_identifier: identifier })
-      setMessage(`项目“${name}”已创建并验证可访问`); await load()
+      await updateProject(projectUUID, record2)
+      await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: projectUUID, project_identifier: name })
+      setMessage(`项目“${name}”已创建`); await load()
     } catch (error: any) { setMessage(`创建失败：${error?.message || '未知错误'}。请先刷新确认项目是否已生成。`) } finally { setBusy(''); sessionStorage.removeItem(lockKey) }
   }, [load])
 

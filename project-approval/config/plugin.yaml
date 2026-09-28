@@ -2,7 +2,7 @@ service:
   app_id: project_approval_v2
   name: 立项审批
   description: 立项审批通过后生成待创建记录，并在记录页创建项目
-  version: 2.4.2
+  version: 2.4.3
   mode: team
   logo: null
   language: nodejs
@@ -81,6 +81,16 @@ apis:
       - POST
     url: /team/:teamUUID/project-fields/list
     function: listProjectFields
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/project/create
+    function: createProject
+  - type: external
+    methods:
+      - POST
+    url: /team/:teamUUID/project/update
+    function: updateProjectFields
 events:
   - eventType: ones:project:issue-status:changed
     function: onIssueStatusChanged
@@ -171,6 +181,18 @@ storage:
         project_name:
           type: text
           length: 256
+          default: ''
+        owner_uuid:
+          type: text
+          length: 64
+          default: ''
+        start_date:
+          type: text
+          length: 16
+          default: ''
+        end_date:
+          type: text
+          length: 16
           default: ''
         trigger_user_uuid:
           type: text

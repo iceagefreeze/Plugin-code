@@ -37,6 +37,9 @@ declare var ONESEntities: {
             project_uuid?: string;
             project_identifier?: string;
             project_name?: string;
+            owner_uuid?: string;
+            start_date?: string;
+            end_date?: string;
             trigger_user_uuid?: string;
             project_type_uuid?: string;
             project_type_name?: string;
