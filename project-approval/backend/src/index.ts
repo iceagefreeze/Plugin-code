@@ -220,25 +220,27 @@ export async function createProject(req: PluginRequest): Promise<PluginResponse>
   if (!teamUUID) return fail('MISSING_TEAM', '无法识别当前团队')
   const b = body(req)
   const name = String(b.name || '').trim()
-  const templateID = String(b.template_uuid || 'comwater').trim()
+  const templateID = String(b.template_uuid || 'project-t2').trim()
   const members = Array.isArray(b.members) ? b.members.map((x: any) => String(x)).filter(Boolean) : []
+  const owner = String(b.owner || '').trim()
   if (!name) return fail('INVALID_REQUEST', '缺少项目名称')
   try {
-    Logger.info(`[立项审批] 创建项目请求 teamID=${teamUUID} name=${name} template=${templateID} members=${JSON.stringify(members)}`)
-    const r: any = await FetchAsAdmin(`/openapi/v2/project/projects`, { method: 'POST', params: { teamID: teamUUID }, data: { name, templateID, members } })
-    const value = responseData(r)
+    // 内部 API：POST /project/api/project/team/:teamUUID/projects/add
+    // 客户端生成 16 位项目 uuid（负责人前缀 8 位 + 随机 8 位）
+    const prefix = (owner || '00000000').slice(0, 8).padEnd(8, '0')
+    const random8 = Math.random().toString(36).slice(2, 10).padEnd(8, '0')
+    const projectUUID = (prefix + random8).slice(0, 16)
+    const payload: any = { project: { uuid: projectUUID, name }, template_id: templateID, members }
+    if (owner) payload.project.assign = owner
+    Logger.info(`[立项审批] 创建项目请求(内部API) teamID=${teamUUID} name=${name} template=${templateID} uuid=${projectUUID} owner=${owner}`)
+    const r: any = await OPFetch(`/project/api/project/team/${teamUUID}/projects/add`, { method: 'POST', teamUUID, data: payload })
     Logger.info(`[立项审批] 创建项目原始响应=${responseSummary(r).slice(0, 800)}`)
-    const projectUUID = String(value?.id || value?.data?.id || '')
-    if (!projectUUID) return fail('CREATE_FAILED', `创建项目未返回项目 ID：${responseSummary(r).slice(0, 300)}`)
-    const projectIdentifier = String(value?.identifier || value?.data?.identifier || '')
-    // 创建后立即验证项目真实存在
-    try {
-      const check: any = await FetchAsAdmin(`/openapi/v2/project/projects/${projectUUID}`, { method: 'GET', params: { teamID: teamUUID } })
-      const cv = responseData(check)
-      Logger.info(`[立项审批] 创建后验证 project=${projectUUID} name=${cv?.name ?? cv?.data?.name ?? '?'} 响应=${responseSummary(check).slice(0, 300)}`)
-    } catch (e: any) { Logger.error(`[立项审批] 创建后验证失败 project=${projectUUID} status=${e?.response?.status || ''} ${e?.message || ''}`) }
-    Logger.info(`[立项审批] 项目创建成功 project=${projectUUID} name=${name} template=${templateID}`)
-    return ok({ project_uuid: projectUUID, identifier: projectIdentifier })
+    const value = responseData(r)
+    const project = value?.project ?? value?.data?.project ?? value?.data ?? value
+    const actualUUID = String(project?.uuid || projectUUID)
+    if (!actualUUID) return fail('CREATE_FAILED', `创建项目未返回项目 UUID：${responseSummary(r).slice(0, 300)}`)
+    Logger.info(`[立项审批] 项目创建成功 project=${actualUUID} name=${name} template=${templateID}`)
+    return ok({ project_uuid: actualUUID, identifier: '' })
   } catch (e: any) {
     Logger.error(`[立项审批] 项目创建失败 ${e?.message || ''} detail=${responseSummary(e?.response).slice(0, 500)}`)
     return fail('CREATE_FAILED', `项目创建失败：${e?.message || ''}`)
@@ -249,16 +251,18 @@ export async function updateProjectFields(req: PluginRequest): Promise<PluginRes
   const b = body(req)
   const projectUUID = String(b.project_uuid || '')
   if (!teamUUID || !projectUUID) return fail('INVALID_REQUEST', '缺少团队或项目 UUID')
-  const data: any = {}
-  if (b.name) data.name = String(b.name)
-  if (b.owner) data.owner = String(b.owner)
-  if (b.planned_start_date) data.plannedStartDate = String(b.planned_start_date).slice(0, 10)
-  if (b.planned_end_date) data.plannedEndDate = String(b.planned_end_date).slice(0, 10)
-  if (b.custom_field && typeof b.custom_field === 'object' && Object.keys(b.custom_field).length) data.customField = b.custom_field
-  if (!Object.keys(data).length) return ok({ updated: false })
+  const item: any = {}
+  if (b.owner) item.assign = String(b.owner)
+  if (b.planned_start_date) item.plan_start_time = Math.floor(new Date(String(b.planned_start_date)).getTime() / 1000)
+  if (b.planned_end_date) item.plan_end_time = Math.floor(new Date(String(b.planned_end_date)).getTime() / 1000)
+  if (b.custom_field && typeof b.custom_field === 'object') {
+    for (const [k, v] of Object.entries(b.custom_field)) if (v) item[k] = v
+  }
+  if (!Object.keys(item).length) return ok({ updated: false })
   try {
-    const r: any = await FetchAsAdmin(`/openapi/v2/project/projects/${projectUUID}`, { method: 'PUT', params: { teamID: teamUUID }, data })
-    Logger.info(`[立项审批] 项目字段更新成功 project=${projectUUID} keys=${Object.keys(data).join(',')}`)
+    // 内部 API：POST /project/api/project/team/:teamUUID/item/project-{uuid}/update
+    const r: any = await OPFetch(`/project/api/project/team/${teamUUID}/item/project-${projectUUID}/update`, { method: 'POST', teamUUID, data: { item } })
+    Logger.info(`[立项审批] 项目字段更新成功 project=${projectUUID} keys=${Object.keys(item).join(',')}`)
     return ok({ updated: true })
   } catch (e: any) {
     Logger.error(`[立项审批] 项目字段更新失败 project=${projectUUID} ${e?.message || ''} detail=${responseSummary(e?.response).slice(0, 500)}`)
@@ -270,10 +274,10 @@ export async function verifyProject(req: PluginRequest): Promise<PluginResponse>
   const projectUUID = String(body(req).project_uuid || '')
   if (!teamUUID || !projectUUID) return fail('INVALID_REQUEST', '缺少项目 UUID')
   try {
-    const r: any = await FetchAsAdmin(`/openapi/v2/project/projects/${projectUUID}`, { method: 'GET', params: { teamID: teamUUID } })
+    const r: any = await OPFetch(`/project/api/project/team/${teamUUID}/projects/info?ids=${projectUUID}`, { method: 'GET', teamUUID })
     const value = responseData(r)
-    const id = String(value?.id || value?.data?.id || '')
-    return ok({ exists: !!id })
+    const projects = value?.projects ?? value?.data?.projects ?? []
+    return ok({ exists: Array.isArray(projects) && projects.length > 0 })
   } catch (e: any) {
     Logger.info(`[立项审批] 验证项目失败 project=${projectUUID} status=${e?.response?.status || ''} ${e?.message || ''}`)
     return ok({ exists: false })

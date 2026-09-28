@@ -92,7 +92,8 @@ function App() {
       const cfg2 = await loadConfig()
       const name = String(record2.project_name || record2.name || `立项项目-${String(record.issue_uuid).slice(-8)}`).trim()
       const members = record.trigger_user_uuid ? [record.trigger_user_uuid] : []
-      const created = await api('/project/create', { name, template_uuid: cfg2.template_uuid || 'comwater', members })
+      const owner = String(record2.owner_uuid || '')
+      const created = await api('/project/create', { name, template_uuid: cfg2.template_uuid || 'project-t2', members, owner })
       const projectUUID = String(created.project_uuid || '')
       if (!projectUUID) throw Error('创建接口未返回项目 UUID')
       const projectIdentifier = String(created.identifier || '')
