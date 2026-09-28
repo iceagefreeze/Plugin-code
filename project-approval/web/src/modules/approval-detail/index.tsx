@@ -91,9 +91,10 @@ function App() {
       const created = await api('/project/create', { name, template_uuid: cfg2.template_uuid || 'comwater', members })
       const projectUUID = String(created.project_uuid || '')
       if (!projectUUID) throw Error('创建接口未返回项目 UUID')
+      const projectIdentifier = String(created.identifier || '')
       localStorage.setItem(lockKey, projectUUID)
       await updateProject(projectUUID, record2)
-      await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: projectUUID, project_identifier: name })
+      await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: projectUUID, project_identifier: projectIdentifier })
       setMessage(`项目“${name}”已创建`); await load()
     } catch (error: any) { setMessage(`创建失败：${error?.message || '未知错误'}。请先刷新确认项目是否已生成。`) } finally { setBusy(''); sessionStorage.removeItem(lockKey) }
   }, [load])
@@ -104,8 +105,8 @@ function App() {
     if (!attempted.current.has(pending.issue_uuid)) { attempted.current.add(pending.issue_uuid); create(pending, true) }
   }).catch((error) => setMessage(`加载失败：${error.message}`)) }, [create, load])
 
-  const open = (id: string, identifier?: string) => { window.parent.location.assign(`/project/#/home/project/view/${identifier || id}`) }
-  return <main><h1>立项审批记录</h1><p>{message}</p><button onClick={() => load().catch((error) => setMessage(`刷新失败：${error.message}`))}>刷新</button>{items.map((record) => <section key={record.id || record.issue_uuid}><b>{record.project_name || record.issue_uuid}</b><span> 状态：{record.status === 'pending' ? '待创建' : record.status === 'created' ? '已创建' : record.status}</span>{record.status === 'pending' && <button disabled={busy === record.issue_uuid} onClick={() => create(record)}>{busy === record.issue_uuid ? '正在创建' : '重新创建'}</button>}{record.project_uuid && <><span> 项目：{record.project_uuid}</span><button onClick={() => open(record.project_uuid, record.project_identifier)}>打开项目</button></>}{record.error_message && <p>{record.error_message}</p>}</section>)}</main>
+  const open = (id: string) => { window.parent.location.assign(`/project/#/home/project/view/${id}`) }
+  return <main><h1>立项审批记录</h1><p>{message}</p><button onClick={() => load().catch((error) => setMessage(`刷新失败：${error.message}`))}>刷新</button>{items.map((record) => <section key={record.id || record.issue_uuid}><b>{record.project_name || record.issue_uuid}</b><span> 状态：{record.status === 'pending' ? '待创建' : record.status === 'created' ? '已创建' : record.status}</span>{record.status === 'pending' && <button disabled={busy === record.issue_uuid} onClick={() => create(record)}>{busy === record.issue_uuid ? '正在创建' : '重新创建'}</button>}{record.project_uuid && <><span> 项目：{record.project_uuid}</span><button onClick={() => open(record.project_uuid)}>打开项目</button></>}{record.error_message && <p>{record.error_message}</p>}</section>)}</main>
 }
 
 ReactDOM.render(<App />, document.getElementById('ones-mf-root'))

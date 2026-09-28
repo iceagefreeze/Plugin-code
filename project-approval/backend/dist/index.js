@@ -29905,13 +29905,19 @@ async function run(teamUUID, issueUUID, eventID, retry = false, request) {
         const startDate = fieldText(mapped('开始日期', '')).slice(0, 10);
         const endDate = fieldText(mapped('结束日期', '')).slice(0, 10);
         const projectType = singleSelect(mapped('项目类型（单选）', '') || mapped('项目类型', ''));
+        // 若类型字段值是选项 UUID 而非名称，用源字段选项查询解析为名称
+        const typeSourceField = String(mapping['项目类型（单选）'] || mapping['项目类型'] || '');
+        let projectTypeName = projectType.name;
+        if (!projectTypeName && projectType.uuid && typeSourceField) {
+            projectTypeName = await resolveOptionName(teamUUID, typeSourceField, projectType.uuid);
+        }
         Logger.info(`[立项审批] 字段值 fieldIDs=${Object.keys(p).join(',')}`);
         Logger.info(`[立项审批] 映射 mapping=${JSON.stringify(mapping).slice(0, 400)}`);
-        Logger.info(`[立项审批] 提取结果 name=${name} owner=${owner} start=${startDate} end=${endDate} type=${projectType.uuid}/${projectType.name}`);
+        Logger.info(`[立项审批] 提取结果 name=${name} owner=${owner} start=${startDate} end=${endDate} type=${projectType.uuid}/${projectTypeName}`);
         const triggerUser = triggerUserOf(request);
         if (!name)
             throw Object.assign(new Error('立项单缺少项目名称'), { code: 'MISSING_FIELD' });
-        const pending = { issue_uuid: issueUUID, team_uuid: teamUUID, event_id: eventID || existing?.event_id || '', status: 'pending', project_uuid: '', project_name: name, owner_uuid: owner, start_date: startDate, end_date: endDate, project_type_uuid: projectType.uuid, project_type_name: projectType.name, trigger_user_uuid: triggerUser, error_code: '', error_message: '', retry_count: Number(existing?.retry_count || 0) + (retry ? 1 : 0), updated_at: Date.now() };
+        const pending = { issue_uuid: issueUUID, team_uuid: teamUUID, event_id: eventID || existing?.event_id || '', status: 'pending', project_uuid: '', project_name: name, owner_uuid: owner, start_date: startDate, end_date: endDate, project_type_uuid: projectType.uuid, project_type_name: projectTypeName, trigger_user_uuid: triggerUser, error_code: '', error_message: '', retry_count: Number(existing?.retry_count || 0) + (retry ? 1 : 0), updated_at: Date.now() };
         runtimeRecords[issueUUID] = pending;
         try {
             await records.set(issueUUID, pending);
@@ -30063,6 +30069,29 @@ async function listProjectFields(req) {
         return fail('LIST_PROJECT_FIELD_FAILED', `项目字段列表加载失败：${e?.message || ''}`);
     }
 }
+// 查询字段选项（POST /openapi/v2/project/field/options），返回 uuid/value 列表
+async function fieldOptions(teamUUID, fieldUUID, uuids) {
+    try {
+        const data = { field_uuid: fieldUUID, include_fields: ['uuid', 'value'], limit: 100 };
+        if (uuids && uuids.length)
+            data.uuids = uuids;
+        const r = await FetchAsAdmin('/openapi/v2/project/field/options', { method: 'POST', params: { teamID: teamUUID }, data });
+        const value = responseData(r);
+        const list = Array.isArray(value) ? value : (value?.list ?? value?.data ?? []);
+        return (Array.isArray(list) ? list : []).map((o) => ({ uuid: String(o.uuid ?? o.id ?? ''), value: String(o.value ?? o.name ?? '') })).filter((o) => o.uuid);
+    }
+    catch (e) {
+        Logger.info(`[立项审批] 字段选项查询失败 field=${fieldUUID} ${e?.message || ''}`);
+        return [];
+    }
+}
+// 将字段值里的选项 UUID 解析为选项名称（源字段）
+async function resolveOptionName(teamUUID, fieldUUID, optionUUID) {
+    if (!fieldUUID || !optionUUID)
+        return '';
+    const options = await fieldOptions(teamUUID, fieldUUID, [optionUUID]);
+    return options.length ? options[0].value : '';
+}
 async function createProject(req) {
     const teamUUID = team(req);
     if (!teamUUID)
@@ -30081,6 +30110,7 @@ async function createProject(req) {
         const projectUUID = String(value?.id || value?.data?.id || '');
         if (!projectUUID)
             return fail('CREATE_FAILED', `创建项目未返回项目 ID：${responseSummary(r).slice(0, 300)}`);
+        const projectIdentifier = String(value?.identifier || value?.data?.identifier || '');
         // 创建后立即验证项目真实存在
         try {
             const check = await FetchAsAdmin(`/openapi/v2/project/projects/${projectUUID}`, { method: 'GET', params: { teamID: teamUUID } });
@@ -30091,7 +30121,7 @@ async function createProject(req) {
             Logger.error(`[立项审批] 创建后验证失败 project=${projectUUID} status=${e?.response?.status || ''} ${e?.message || ''}`);
         }
         Logger.info(`[立项审批] 项目创建成功 project=${projectUUID} name=${name} template=${templateID}`);
-        return ok({ project_uuid: projectUUID });
+        return ok({ project_uuid: projectUUID, identifier: projectIdentifier });
     }
     catch (e) {
         Logger.error(`[立项审批] 项目创建失败 ${e?.message || ''} detail=${responseSummary(e?.response).slice(0, 500)}`);
