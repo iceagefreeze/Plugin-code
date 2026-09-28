@@ -80,7 +80,11 @@ function App() {
     const lockKey = `ones-project-approval:create:${record.issue_uuid}`
     if (sessionStorage.getItem(lockKey) === '1') return
     const knownProject = localStorage.getItem(lockKey)
-    if (knownProject) { await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: knownProject }); await load(); return }
+    if (knownProject) {
+      const v = await api('/project/verify', { project_uuid: knownProject })
+      if (v.exists) { await api('/records/confirm', { issue_uuid: record.issue_uuid, project_uuid: knownProject }); await load(); return }
+      localStorage.removeItem(lockKey)
+    }
     sessionStorage.setItem(lockKey, '1')
     setBusy(record.issue_uuid); setMessage(automatic ? '检测到待创建记录，正在创建项目…' : '正在创建项目…')
     try {

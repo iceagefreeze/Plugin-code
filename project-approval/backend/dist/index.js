@@ -29904,20 +29904,32 @@ async function run(teamUUID, issueUUID, eventID, retry = false, request) {
         const owner = fieldId(mapped('项目负责人', '')) || fieldId(issue?.assignee);
         const startDate = fieldText(mapped('开始日期', '')).slice(0, 10);
         const endDate = fieldText(mapped('结束日期', '')).slice(0, 10);
-        const projectType = singleSelect(mapped('项目类型（单选）', '') || mapped('项目类型', ''));
-        // 若类型字段值是选项 UUID 而非名称，用源字段选项查询解析为名称
+        const typeRaw = mapped('项目类型（单选）', '') || mapped('项目类型', '');
         const typeSourceField = String(mapping['项目类型（单选）'] || mapping['项目类型'] || '');
-        let projectTypeName = projectType.name;
-        if (!projectTypeName && projectType.uuid && typeSourceField) {
-            projectTypeName = await resolveOptionName(teamUUID, typeSourceField, projectType.uuid);
+        let projectTypeUuid = '';
+        let projectTypeName = '';
+        if (typeRaw != null) {
+            const t = singleSelect(typeRaw);
+            if (t.uuid) {
+                projectTypeUuid = t.uuid;
+                projectTypeName = t.name;
+            }
+            else if (t.name && /^[A-Za-z0-9]{8,64}$/.test(t.name)) {
+                // 字符串是选项 UUID（ONES 单选字段值只返回选项 UUID），用 field/options 查名称
+                projectTypeUuid = t.name;
+                projectTypeName = typeSourceField ? await resolveOptionName(teamUUID, typeSourceField, projectTypeUuid) : '';
+            }
+            else {
+                projectTypeName = t.name;
+            }
         }
         Logger.info(`[立项审批] 字段值 fieldIDs=${Object.keys(p).join(',')}`);
         Logger.info(`[立项审批] 映射 mapping=${JSON.stringify(mapping).slice(0, 400)}`);
-        Logger.info(`[立项审批] 提取结果 name=${name} owner=${owner} start=${startDate} end=${endDate} type=${projectType.uuid}/${projectTypeName}`);
+        Logger.info(`[立项审批] 提取结果 name=${name} owner=${owner} start=${startDate} end=${endDate} type=${projectTypeUuid}/${projectTypeName}`);
         const triggerUser = triggerUserOf(request);
         if (!name)
             throw Object.assign(new Error('立项单缺少项目名称'), { code: 'MISSING_FIELD' });
-        const pending = { issue_uuid: issueUUID, team_uuid: teamUUID, event_id: eventID || existing?.event_id || '', status: 'pending', project_uuid: '', project_name: name, owner_uuid: owner, start_date: startDate, end_date: endDate, project_type_uuid: projectType.uuid, project_type_name: projectTypeName, trigger_user_uuid: triggerUser, error_code: '', error_message: '', retry_count: Number(existing?.retry_count || 0) + (retry ? 1 : 0), updated_at: Date.now() };
+        const pending = { issue_uuid: issueUUID, team_uuid: teamUUID, event_id: eventID || existing?.event_id || '', status: 'pending', project_uuid: '', project_name: name, owner_uuid: owner, start_date: startDate, end_date: endDate, project_type_uuid: projectTypeUuid, project_type_name: projectTypeName, trigger_user_uuid: triggerUser, error_code: '', error_message: '', retry_count: Number(existing?.retry_count || 0) + (retry ? 1 : 0), updated_at: Date.now() };
         runtimeRecords[issueUUID] = pending;
         try {
             await records.set(issueUUID, pending);
@@ -30157,6 +30169,22 @@ async function updateProjectFields(req) {
         return fail('UPDATE_FAILED', `项目字段更新失败：${e?.message || ''}`);
     }
 }
+async function verifyProject(req) {
+    const teamUUID = team(req);
+    const projectUUID = String(body(req).project_uuid || '');
+    if (!teamUUID || !projectUUID)
+        return fail('INVALID_REQUEST', '缺少项目 UUID');
+    try {
+        const r = await FetchAsAdmin(`/openapi/v2/project/projects/${projectUUID}`, { method: 'GET', params: { teamID: teamUUID } });
+        const value = responseData(r);
+        const id = String(value?.id || value?.data?.id || '');
+        return ok({ exists: !!id });
+    }
+    catch (e) {
+        Logger.info(`[立项审批] 验证项目失败 project=${projectUUID} status=${e?.response?.status || ''} ${e?.message || ''}`);
+        return ok({ exists: false });
+    }
+}
 
 exports.confirmRecord = confirmRecord;
 exports.createProject = createProject;
@@ -30170,3 +30198,4 @@ exports.onIssueStatusChanged = onIssueStatusChanged;
 exports.retryRecord = retryRecord;
 exports.saveConfig = saveConfig;
 exports.updateProjectFields = updateProjectFields;
+exports.verifyProject = verifyProject;
