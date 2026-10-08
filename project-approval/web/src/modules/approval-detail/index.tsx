@@ -152,7 +152,7 @@ function App() {
     if (!attempted.current.has(pending.issue_uuid)) { attempted.current.add(pending.issue_uuid); create(pending, true) }
   }).catch((error) => setMessage(`加载失败：${error.message}`)) }, [create, load])
 
-  const open = (id: string) => { window.parent.location.assign(`/project/#/home/project/view/${id}`) }
+  const open = (id: string) => { window.open(`/project/#/home/project/view/${id}`, '_blank') }
   return <main><h1>立项审批记录</h1><p>{message}</p><button onClick={() => load().catch((error) => setMessage(`刷新失败：${error.message}`))}>刷新</button>{items.map((record) => <section key={record.id || record.issue_uuid}><b>{record.project_name || record.issue_uuid}</b><span> 状态：{record.status === 'pending' ? '待创建' : record.status === 'created' ? '已创建' : record.status}</span>{record.status === 'pending' && <button disabled={busy === record.issue_uuid} onClick={() => create(record)}>{busy === record.issue_uuid ? '正在创建' : '重新创建'}</button>}{record.project_uuid && <><span> 项目：{record.project_uuid}</span><button onClick={() => open(record.project_uuid)}>打开项目</button></>}{record.error_message && <p>{record.error_message}</p>}</section>)}</main>
 }
 

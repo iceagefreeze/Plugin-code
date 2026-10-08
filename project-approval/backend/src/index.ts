@@ -49,7 +49,22 @@ async function issueDetail(teamUUID: string, issueUUID: string, req?: any): Prom
       const fid = String(fv?.fieldID || fv?.field_id || fv?.fieldId || '')
       if (fid) properties[fid] = fv?.value
     }
-    if (name || Object.keys(properties).length) return { name, properties }
+    // 顶层日期字段（系统字段，不在 fieldValues 里）
+    const toDate = (v: any): string => {
+      if (v == null || v === '') return ''
+      const s = String(v)
+      if (typeof v === 'number' || /^\d{10,13}$/.test(s)) {
+        const ms = s.length >= 13 ? Number(s) : Number(s) * 1000
+        const d = new Date(ms)
+        if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10)
+      }
+      return s.slice(0, 10)
+    }
+    const planStartDate = toDate(issue?.planStartDate)
+    const planEndDate = toDate(issue?.planEndDate)
+    const dueDate = toDate(issue?.dueDate)
+    if (planStartDate || planEndDate || dueDate) Logger.info(`[立项审批] issue 顶层日期 planStart=${planStartDate} planEnd=${planEndDate} due=${dueDate}`)
+    if (name || Object.keys(properties).length || planStartDate || planEndDate || dueDate) return { name, properties, planStartDate, planEndDate, dueDate }
   } catch (e: any) {
     Logger.info(`[立项审批] OpenAPI工作项详情失败 issue=${issueUUID} status=${e?.response?.status || ''} message=${e?.message || ''}`)
   }
@@ -88,8 +103,8 @@ async function run(teamUUID: string, issueUUID: string, eventID: string, retry =
     const mapped = (target: string, fallback: string): any => { const raw = String(mapping[target] || fallback || '').trim(); if (!raw) return undefined; return p[raw] }
     const name = fieldText(mapped('项目名称', '')) || String(issue?.name || issue?.title || `立项项目-${issueUUID.slice(-8)}`).trim()
     const owner = fieldId(mapped('项目负责人', '')) || fieldId(issue?.assignee)
-    const startDate = fieldText(mapped('开始日期', '')).slice(0, 10)
-    const endDate = fieldText(mapped('结束日期', '')).slice(0, 10)
+    const startDate = (fieldText(mapped('开始日期', '')) || String(issue?.planStartDate || '')).slice(0, 10)
+    const endDate = (fieldText(mapped('结束日期', '')) || String(issue?.planEndDate || issue?.dueDate || '')).slice(0, 10)
     const typeRaw = mapped('项目类型（单选）', '') || mapped('项目类型', '')
     const typeSourceField = String(mapping['项目类型（单选）'] || mapping['项目类型'] || '')
     let projectTypeUuid = ''
