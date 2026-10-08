@@ -103,7 +103,9 @@ async function run(teamUUID: string, issueUUID: string, eventID: string, retry =
         projectTypeName = typeSourceField ? await resolveOptionName(teamUUID, typeSourceField, projectTypeUuid) : ''
       } else { projectTypeName = t.name }
     }
+    const fieldSummary = Object.entries(p).map(([k, v]) => `${k}=${fieldText(v).slice(0, 40)}`).join(' ; ')
     Logger.info(`[立项审批] 字段值 fieldIDs=${Object.keys(p).join(',')}`)
+    Logger.info(`[立项审批] 字段值明细 ${fieldSummary || '(空)'}`)
     Logger.info(`[立项审批] 映射 mapping=${JSON.stringify(mapping).slice(0, 400)}`)
     Logger.info(`[立项审批] 提取结果 name=${name} owner=${owner} start=${startDate} end=${endDate} type=${projectTypeUuid}/${projectTypeName}`)
     const triggerUser = triggerUserOf(request)
