@@ -18,12 +18,18 @@ const gql = (q: string) => api('/items/graphql?t=issueTypes', { query: q, variab
 
 const input: any = { width: '100%', boxSizing: 'border-box', height: 44, padding: '0 12px', fontSize: 16, border: '1px solid #c9cdd3', borderRadius: 4 }
 
-// ONES 内置项目模板（内部接口 template_id 枚举）
-// 仅 waterfall_development 已验证可用；agile/task 为推测值，不确定时前端回退瀑布
+// ONES 项目模板（来自内部接口 GET /projects/templates 的真实枚举）
 const TEMPLATES = [
-  { uuid: 'waterfall_development', name: '瀑布式项目管理（已验证）' },
-  { uuid: 'agile_development', name: '敏捷项目管理' },
-  { uuid: 'task_management', name: '通用任务管理' },
+  { uuid: 'agile_scrum', name: '敏捷研发 Scrum' },
+  { uuid: 'waterfall_development', name: '瀑布研发管理' },
+  { uuid: 'hybrid_development', name: '混合研发管理' },
+  { uuid: 'kanban', name: '看板管理' },
+  { uuid: 'product_roadmap', name: '产品路线图' },
+  { uuid: 'requirement_management', name: '需求管理' },
+  { uuid: 'bug_tracking', name: '缺陷管理' },
+  { uuid: 'service_management', name: '工单服务管理' },
+  { uuid: 'project_planning', name: '项目计划跟踪' },
+  { uuid: 'task_management', name: '通用任务协作' },
 ]
 
 function Picker({ label, value, items, onChange, placeholder }: { label: string, value: string, items: any[], onChange: (v: string) => void, placeholder?: string }) {

@@ -43,8 +43,8 @@ const dateValue = (value: any) => { if (!value) return ''; if (typeof value === 
 // ---- 项目创建与验证（走前端同源内部接口，老版本已验证可靠）----
 const native = async (path: string, data: any) => json(await fetch(`/project/api/ones-project/team/${team()}${path}`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }), '项目创建接口')
 const uuid = () => Array.from({ length: 16 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 36)]).join('')
-// 内部模板枚举：配置页已直接存内部枚举；兜底回退瀑布（已验证）防止误配
-const KNOWN_TEMPLATES = new Set(['waterfall_development', 'agile_development', 'task_management'])
+// 内部模板枚举（来自 GET /projects/templates 的真实值）；兜底回退瀑布防止误配
+const KNOWN_TEMPLATES = new Set(['agile_scrum', 'waterfall_development', 'hybrid_development', 'kanban', 'product_roadmap', 'requirement_management', 'bug_tracking', 'service_management', 'project_planning', 'task_management'])
 const verifyProject = async (projectUUID: string) => { const id = team(); const paths = [`/project/api/project/team/${id}/project/${projectUUID}`, `/project/api/project/team/${id}/project/${projectUUID}/browse`]; for (const path of paths) for (const method of ['GET', 'POST']) try { const r = await fetch(path, { method, credentials: 'include', headers: method === 'POST' ? { 'Content-Type': 'application/json' } : undefined, body: method === 'POST' ? '{}' : undefined }); if (!r.ok) continue; const value: any = await r.json(); const data: any = value?.body || value?.data || value; if (data && typeof data === 'object' && (data.uuid || data.project_uuid || data.name || data.project)) return true } catch {} return false }
 
 // ---- 从配置读字段映射（消除硬编码字段 UUID）----
