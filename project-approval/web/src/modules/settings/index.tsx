@@ -19,6 +19,7 @@ const gql = (q: string) => api('/items/graphql?t=issueTypes', { query: q, variab
 const input: any = { width: '100%', boxSizing: 'border-box', height: 44, padding: '0 12px', fontSize: 16, border: '1px solid #c9cdd3', borderRadius: 4 }
 
 // ONES 项目模板（来自内部接口 GET /projects/templates 的真实枚举）
+// 已剔除 service_management（依赖工单插件 plugin_EXeviQzu）
 const TEMPLATES = [
   { uuid: 'agile_scrum', name: '敏捷研发 Scrum' },
   { uuid: 'waterfall_development', name: '瀑布研发管理' },
@@ -27,7 +28,6 @@ const TEMPLATES = [
   { uuid: 'product_roadmap', name: '产品路线图' },
   { uuid: 'requirement_management', name: '需求管理' },
   { uuid: 'bug_tracking', name: '缺陷管理' },
-  { uuid: 'service_management', name: '工单服务管理' },
   { uuid: 'project_planning', name: '项目计划跟踪' },
   { uuid: 'task_management', name: '通用任务协作' },
 ]
